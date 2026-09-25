@@ -424,10 +424,10 @@ export default function LeadManagementView({
     selectedHeadquarters,
   ]);
 
-  // Autocomplete suggestions for top search bar
+  // Autocomplete suggestions for top search bar (matching suggestions appear dynamically from the 1st typed character)
   const globalSuggestions = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
-    if (!query || query.length < 2) return [];
+    if (!query || query.length < 1) return [];
 
     const suggestions: { label: string; type: string; onSelect: () => void }[] = [];
 

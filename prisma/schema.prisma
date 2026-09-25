@@ -17,6 +17,7 @@ model User {
   updatedAt     DateTime   @updatedAt @map("updated_at")
   accounts      Account[]
   campaigns     Campaign[]
+  leads         Lead[]
   sessions      Session[]
 
   @@map("users")
@@ -63,18 +64,26 @@ model VerificationToken {
 }
 
 model Company {
-  id          Int      @id @default(autoincrement())
-  handle      String   @unique
-  name        String
-  website     String?
-  industry    String?
-  size        String?
-  type        String?
-  founded     Int?
-  city        String?
-  state       String?
-  countryCode String?  @map("country_code")
-  createdAt   DateTime @default(now()) @map("created_at")
+  id              String     @id @default(cuid())
+  handle          String     @unique
+  name            String
+  website         String?
+  industry        String?
+  size            String?
+  phone           String?
+  address         String?
+  city            String?
+  state           String?
+  country         String?
+  countryCode     String?    @map("country_code")
+  verifiedDomain  Boolean    @default(false) @map("verified_domain")
+  researchSummary String?    @db.Text @map("research_summary")
+  matchScore      Int        @default(0) @map("match_score")
+  createdAt       DateTime   @default(now()) @map("created_at")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
+  leads           Lead[]
+  sources         Source[]
+  evidences       Evidence[]
 
   @@map("companies")
 }
@@ -87,14 +96,102 @@ model Campaign {
   selectedLeadIds    Json
   selectedLeads      Json
   emails             Json
+  personalizedEmails Json?
   connectedEmail     String?
   provider           String?
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
-  personalizedEmails Json
   userId             String?  @map("user_id")
-  user               User?    @relation(fields: [userId], references: [id])
+  user               User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  leads              Lead[]
 
   @@index([userId])
   @@map("campaigns")
+}
+
+model Lead {
+  id                  String     @id @default(cuid())
+  companyId           String?    @map("company_id")
+  companyRef          Company?   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  campaignId          String?    @map("campaign_id")
+  campaign            Campaign?  @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  userId              String?    @map("user_id")
+  user                User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  name                String
+  firstName           String?    @map("first_name")
+  lastName            String?    @map("last_name")
+  jobTitle            String     @map("job_title")
+  role                String
+  function            String?
+  company             String
+  industry            String
+  companySize         String?    @map("company_size")
+  country             String
+  state               String?
+  city                String
+  location            String
+  companyHeadquarters String?    @map("company_headquarters")
+  email               String
+  domain              String?
+  emailVerified       Boolean    @default(false) @map("email_verified")
+  emailVerifyStatus   String?    @map("email_verify_status")
+  verificationTag     String     @default("Review contact") @map("verification_tag")
+  matchReason         String     @db.Text @map("match_reason")
+  matchScore          Int        @default(0) @map("match_score")
+  status              String     @default("Discovered")
+  createdAt           DateTime   @default(now()) @map("created_at")
+  updatedAt           DateTime   @updatedAt @map("updated_at")
+  sources             Source[]
+  evidences           Evidence[]
+
+  @@index([companyId])
+  @@index([campaignId])
+  @@index([userId])
+  @@map("leads")
+}
+
+model Source {
+  id        String   @id @default(cuid())
+  leadId    String?  @map("lead_id")
+  lead      Lead?    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  companyId String?  @map("company_id")
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  type      String
+  url       String?  @db.Text
+  title     String?
+  rawData   Json?    @map("raw_data")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([leadId])
+  @@index([companyId])
+  @@map("sources")
+}
+
+model Evidence {
+  id              String    @id @default(cuid())
+  leadId          String?   @map("lead_id")
+  lead            Lead?     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  companyId       String?   @map("company_id")
+  company         Company?  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  type            String
+  content         String    @db.Text
+  confidenceScore Int       @default(0) @map("confidence_score")
+  verifiedAt      DateTime? @map("verified_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  @@index([leadId])
+  @@index([companyId])
+  @@map("evidences")
+}
+
+model JobResult {
+  id         String   @id @default(cuid())
+  jobId      String   @unique @map("job_id")
+  userId     String?  @map("user_id")
+  status     String
+  totalFound Int      @default(0) @map("total_found")
+  savedCount Int      @default(0) @map("saved_count")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("job_results")
 }

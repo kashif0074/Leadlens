@@ -501,3 +501,146 @@ export async function generateCampaignEmails(
     503,
   );
 }
+export type SearchCriteria = {
+  industry: string;
+  city: string;
+  country: string;
+  keywords: string[];
+  companySize?: string;
+};
+
+function parseSearchCriteria(value: unknown): SearchCriteria {
+  const obj = (typeof value === "string" ? JSON.parse(value) : value) as Record<string, unknown>;
+
+  const industry = typeof obj?.industry === "string" ? obj.industry : "";
+  const city = typeof obj?.city === "string" ? obj.city : "";
+  const country = typeof obj?.country === "string" ? obj.country : "";
+  const companySize = typeof obj?.companySize === "string" ? obj.companySize : undefined;
+  const keywords = Array.isArray(obj?.keywords)
+    ? obj.keywords.filter((k): k is string => typeof k === "string")
+    : [];
+
+  if (!industry || !city) {
+    throw groqError("Groq could not identify a clear industry and city from this prompt. Please be more specific.", 422);
+  }
+
+  return { industry, city, country, keywords, companySize };
+}
+
+/**
+ * Extracts structured search criteria (industry, city, country, keywords) from a
+ * free-text campaign prompt, using the same 3-key failover mechanism as email generation.
+ */
+export async function extractSearchCriteria(
+  prompt: string,
+  signal?: AbortSignal,
+): Promise<SearchCriteria> {
+  const configuredKeys = getConfiguredGroqKeys();
+  if (!configuredKeys.length) {
+    throw groqError("No Groq API keys are configured on the server. Please add GROQ_API_KEY_1 to .env.", 500);
+  }
+  if (!prompt || prompt.trim().length < 10) {
+    throw groqError("Please describe your campaign in more detail.", 400);
+  }
+
+  const requestBody = JSON.stringify({
+    model: GROQ_MODEL,
+    temperature: 0.1,
+    reasoning_effort: "low",
+    max_completion_tokens: 300,
+    response_format: { type: "json_object" },
+    messages: [
+      {
+        role: "system",
+        content:
+          'Extract structured lead-search criteria from a B2B campaign brief. Return only valid JSON: {"industry":"...","city":"...","country":"...","keywords":["..."],"companySize":"..."}. "industry" and "city" are required and must be concrete (e.g. "dental clinics", "Dubai"), never vague. "keywords" are 2-4 short terms useful for a business search engine. If companySize is not mentioned, omit it.',
+      },
+      { role: "user", content: prompt },
+    ],
+  });
+
+  const keysToTry = getPrioritizedKeys(configuredKeys);
+  const failureHistory: string[] = [];
+
+  for (let i = 0; i < keysToTry.length; i++) {
+    const keyConfig = keysToTry[i];
+    const isLastKey = i === keysToTry.length - 1;
+    const nextKeyConfig = !isLastKey ? keysToTry[i + 1] : null;
+
+    if (signal?.aborted) throw groqError("Cancelled.", 499);
+
+    const attemptController = new AbortController();
+    const timeoutId = setTimeout(() => attemptController.abort(), PER_KEY_TIMEOUT_MS);
+    const onParentAbort = () => attemptController.abort();
+    if (signal) signal.addEventListener("abort", onParentAbort, { once: true });
+
+    let response: Response;
+    try {
+      response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${keyConfig.key}` },
+        signal: attemptController.signal,
+        body: requestBody,
+      });
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+      if (signal) signal.removeEventListener("abort", onParentAbort);
+      const errorMsg = fetchError instanceof Error ? fetchError.message : "Network request failed";
+      keyHealthTracker.set(keyConfig.key, { cooldownUntil: Date.now() + 30_000, lastFailureReason: errorMsg, failedAt: Date.now() });
+      failureHistory.push(`${keyConfig.label}: ${errorMsg}`);
+      if (!isLastKey && nextKeyConfig) continue;
+      throw groqError("The AI criteria extraction service is temporarily unavailable. Please try again.", 503);
+    } finally {
+      clearTimeout(timeoutId);
+      if (signal) signal.removeEventListener("abort", onParentAbort);
+    }
+
+    let responseData: { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } };
+    try {
+      responseData = await response.json();
+    } catch {
+      if (!isLastKey && nextKeyConfig) continue;
+      throw groqError("The AI criteria extraction service is temporarily unavailable.", 503);
+    }
+
+    if (!response.ok || responseData.error) {
+      const rawErrorMsg = responseData.error?.message || `HTTP ${response.status} error`;
+      const cooldown = extractCooldownMs(response, rawErrorMsg, response.status);
+      keyHealthTracker.set(keyConfig.key, { cooldownUntil: Date.now() + cooldown, lastFailureReason: rawErrorMsg, failedAt: Date.now() });
+      failureHistory.push(`${keyConfig.label}: ${rawErrorMsg}`);
+            if (isFailoverEligible(response.status, rawErrorMsg)) {
+        if (!isLastKey && nextKeyConfig) continue;
+        throw groqError("The AI criteria extraction service is temporarily at peak capacity.", 503);
+      }
+
+      if (!isLastKey && nextKeyConfig) continue;
+      throw groqError(`AI criteria extraction error: ${rawErrorMsg}`, response.status);
+    }
+
+    const text = responseData.choices?.[0]?.message?.content;
+    if (!text?.trim()) {
+      keyHealthTracker.set(keyConfig.key, { cooldownUntil: Date.now() + 15_000, lastFailureReason: "Empty completion returned", failedAt: Date.now() });
+      failureHistory.push(`${keyConfig.label}: Empty completion returned`);
+      if (!isLastKey && nextKeyConfig) continue;
+      throw groqError("The AI returned an empty response. Please retry.", 502);
+    }
+
+    try {
+      const cleaned = extractJsonSubstring(text);
+      const criteria = parseSearchCriteria(cleaned);
+      keyHealthTracker.delete(keyConfig.key);
+      return criteria;
+    } catch (parseErr) {
+      if (parseErr instanceof Error && (parseErr as Error & { status?: number }).status === 422) {
+        throw parseErr;
+      }
+      const parseMessage = parseErr instanceof Error ? parseErr.message : "Parse error";
+      keyHealthTracker.set(keyConfig.key, { cooldownUntil: Date.now() + 10_000, lastFailureReason: parseMessage, failedAt: Date.now() });
+      failureHistory.push(`${keyConfig.label}: ${parseMessage}`);
+      if (!isLastKey && nextKeyConfig) continue;
+      throw groqError("The AI returned invalid search criteria. Please retry.", 502);
+    }
+  }
+
+  throw groqError("The AI criteria extraction service is temporarily at peak capacity.", 503);
+}

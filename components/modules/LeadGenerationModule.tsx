@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useSession, signIn } from "next-auth/react";
-import { ArrowLeft, ArrowRight, Check, Loader2, Sparkles, UserCheck } from "lucide-react";
-import { generatedLeadPool, leadDomain } from "../../lib/leads";
+import { ArrowLeft, ArrowRight, Check, Loader2, Sparkles, AlertCircle, RotateCcw } from "lucide-react";
+import { leadDomain } from "../../lib/leads";
 import type { Lead } from "../../types";
 import LeadLensLogo from "../common/LeadLensLogo";
 
@@ -19,33 +19,93 @@ export interface LeadGenerationContext {
 
 interface LeadGenerationModuleProps {
   prompt: string;
+  initialLeads?: Lead[];
   onConnectionComplete: (context: LeadGenerationContext) => void;
   onBackToLanding?: () => void;
 }
 
 export default function LeadGenerationModule({
   prompt,
+  initialLeads,
   onConnectionComplete,
   onBackToLanding,
 }: LeadGenerationModuleProps) {
   const { data: session, status } = useSession();
+  const [loading, setLoading] = useState(!initialLeads || initialLeads.length === 0);
+  const [allGeneratedLeads, setAllGeneratedLeads] = useState<Lead[]>(() => initialLeads || []);
   const [revealedAll, setRevealedAll] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [error, setError] = useState("");
+  const [loadingStep, setLoadingStep] = useState(0);
 
-  // Exactly 8 leads loaded in dataset
-  const allGeneratedLeads = useMemo(() => generatedLeadPool.slice(0, 8), []);
+  const loadingSteps = [
+    "Extracting ICP and search criteria with Groq AI...",
+    "Discovering active businesses via Geoapify...",
+    "Confirming official company domains with Tavily...",
+    "Verifying decision-maker emails & deliverability...",
+    "Scoring leads and applying compliance checks...",
+  ];
 
-  // Visible leads: initially only 3, reveals all 8 after clicking Show More Leads
+  // Fetch real leads from the backend lead generation pipeline
+  const fetchLeads = useCallback(async (promptText: string) => {
+    if (!promptText || promptText.trim().length < 6) return;
+
+    setLoading(true);
+    setError("");
+    setLoadingStep(0);
+
+    const stepInterval = setInterval(() => {
+      setLoadingStep((prev) => (prev < loadingSteps.length - 1 ? prev + 1 : prev));
+    }, 2500);
+
+    try {
+      const response = await fetch("/api/discover", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: promptText,
+          limit: 8,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to generate leads for this campaign.");
+      }
+
+      const receivedLeads: Lead[] = Array.isArray(data.leads) ? data.leads : [];
+      if (!receivedLeads.length) {
+        throw new Error("No verified leads could be generated for this criteria. Please try a broader prompt.");
+      }
+
+      setAllGeneratedLeads(receivedLeads);
+      setSelected(new Set(receivedLeads.slice(0, 3).map((l) => l.id)));
+    } catch (err) {
+      console.error("[LeadGenerationModule] Discovery error:", err);
+      setError(err instanceof Error ? err.message : "Unable to generate leads. Please try again.");
+    } finally {
+      clearInterval(stepInterval);
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!initialLeads || initialLeads.length === 0) {
+      fetchLeads(prompt);
+    }
+  }, [prompt, initialLeads, fetchLeads]);
+
+  // Visible leads: initially 3 reviewed leads, reveals all 8 after clicking Show More Leads
   const visibleLeads = useMemo(
     () => (revealedAll ? allGeneratedLeads : allGeneratedLeads.slice(0, 3)),
     [revealedAll, allGeneratedLeads],
   );
 
   // Selected leads: initialized to first 3 leads
-  const [selected, setSelected] = useState<Set<string>>(
-    () => new Set(allGeneratedLeads.slice(0, 3).map((lead) => lead.id)),
+  const [selected, setSelected] = useState<Set<string>>(() =>
+    new Set((initialLeads || []).slice(0, 3).map((lead) => lead.id)),
   );
 
   const toggle = (id: string) => {
@@ -58,7 +118,6 @@ export default function LeadGenerationModule({
   };
 
   const handleShowMoreLeads = () => {
-    // Reveal all 8 leads on the same screen
     setRevealedAll(true);
     setSelected((current) => {
       const next = new Set(current);
@@ -91,7 +150,6 @@ export default function LeadGenerationModule({
 
       const selectedLeads = allGeneratedLeads.filter((lead) => selected.has(lead.id));
 
-      // Persist exact prompt and all 8 leads across Google OAuth
       const pendingContext = {
         prompt,
         selectedLeadIds: selectedLeads.map((lead) => lead.id),
@@ -112,6 +170,73 @@ export default function LeadGenerationModule({
     }
   };
 
+  // Loading State
+  if (loading) {
+    return (
+      <main className="min-h-screen bg-canvas px-4 py-8 sm:px-6 flex flex-col items-center justify-center">
+        <div className="mx-auto w-full max-w-lg text-center bg-white rounded-3xl border border-line p-8 shadow-xs">
+          <div className="flex justify-center mb-5">
+            <div className="h-12 w-12 rounded-2xl bg-green-soft flex items-center justify-center text-green shadow-2xs">
+              <Sparkles className="h-6 w-6 animate-pulse" />
+            </div>
+          </div>
+          <h2 className="font-serif text-2xl font-bold text-ink">Generating Reviewed Leads</h2>
+          <p className="mt-2 text-xs text-muted max-w-sm mx-auto">
+            Our pipeline is searching, verifying domains, validating emails, and scoring decision makers in real time.
+          </p>
+
+          <div className="mt-6 rounded-2xl bg-canvas border border-line p-4 text-left space-y-3">
+            <div className="flex items-center gap-3">
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-green border-t-transparent shrink-0" />
+              <span className="text-xs font-semibold text-ink">{loadingSteps[loadingStep]}</span>
+            </div>
+            <div className="w-full bg-mist rounded-full h-1.5 overflow-hidden">
+              <div
+                className="bg-green h-full transition-all duration-500 rounded-full"
+                style={{ width: `${((loadingStep + 1) / loadingSteps.length) * 100}%` }}
+              />
+            </div>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  // Error State with Retry
+  if (error && allGeneratedLeads.length === 0) {
+    return (
+      <main className="min-h-screen bg-canvas px-4 py-8 sm:px-6 flex flex-col items-center justify-center">
+        <div className="mx-auto w-full max-w-md text-center bg-white rounded-3xl border border-red-200 p-8 shadow-xs">
+          <div className="flex justify-center mb-4 text-red-500">
+            <AlertCircle className="h-10 w-10" />
+          </div>
+          <h2 className="font-serif text-xl font-bold text-ink">Lead Discovery Notice</h2>
+          <p className="mt-2 text-xs text-muted leading-relaxed">{error}</p>
+
+          <div className="mt-6 flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={() => fetchLeads(prompt)}
+              className="btn btn-primary text-xs py-2.5 px-4 cursor-pointer flex items-center justify-center gap-2"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              <span>Retry Lead Generation</span>
+            </button>
+            {onBackToLanding && (
+              <button
+                type="button"
+                onClick={onBackToLanding}
+                className="btn btn-secondary text-xs py-2 px-4 cursor-pointer"
+              >
+                Back to Landing
+              </button>
+            )}
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-canvas px-4 py-6 sm:px-6 sm:py-8 flex flex-col justify-center">
       <div className="mx-auto w-full max-w-4xl">
@@ -124,7 +249,9 @@ export default function LeadGenerationModule({
                 Matching Leads
               </h1>
               <p className="text-xs text-muted">
-                {revealedAll ? "All 8 verified leads unlocked" : "Showing 3 of 8 matching leads"}
+                {revealedAll
+                  ? `All ${allGeneratedLeads.length} verified leads unlocked`
+                  : `Showing 3 of ${allGeneratedLeads.length} matching leads`}
               </p>
             </div>
           </div>
@@ -145,9 +272,9 @@ export default function LeadGenerationModule({
           </div>
         )}
 
-        {/* Compact Lead Cards Container */}
+        {/* Lead Cards Container */}
         <div className="space-y-2.5">
-          {visibleLeads.map((lead, index) => {
+          {visibleLeads.map((lead) => {
             const isChecked = selected.has(lead.id);
             return (
               <div
@@ -184,7 +311,15 @@ export default function LeadGenerationModule({
                 </div>
 
                 <div className="flex items-center gap-2.5 shrink-0">
-                  <span className="hidden sm:inline-flex rounded-full bg-green-soft px-2 py-0.5 text-[10px] font-bold text-green">
+                  <span
+                    className={`hidden sm:inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                      lead.verificationTag === "Email verified"
+                        ? "bg-green-soft text-green"
+                        : lead.verificationTag === "Enriched"
+                          ? "bg-blue-50 text-blue-700 border border-blue-200"
+                          : "bg-amber-50 text-amber-700 border border-amber-200"
+                    }`}
+                  >
                     {lead.verificationTag}
                   </span>
                   <span className="rounded-full bg-mist px-2.5 py-0.5 text-xs font-bold text-ink">
@@ -246,7 +381,7 @@ export default function LeadGenerationModule({
         </div>
       </div>
 
-      {/* Google Authentication Modal (Shown when continuing) */}
+      {/* Google Authentication Modal */}
       {showAuthModal && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 backdrop-blur-xs p-4"
@@ -270,7 +405,7 @@ export default function LeadGenerationModule({
             <div className="mt-6">
               <div className="inline-flex items-center gap-1.5 rounded-full bg-green-soft px-3 py-1 text-xs font-bold text-green">
                 <Sparkles className="h-3.5 w-3.5" />
-                <span>All 8 leads revealed</span>
+                <span>All {allGeneratedLeads.length} leads unlocked</span>
               </div>
               <h2 className="mt-3 font-serif text-2xl font-bold tracking-tight text-ink">
                 Sign in to continue
