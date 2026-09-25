@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { DM_Sans, Fraunces } from "next/font/google";
+import AuthProvider from "@/components/providers/AuthProvider";
 import "./globals.css";
 
 const dmSans = DM_Sans({
@@ -29,7 +30,9 @@ export default function RootLayout({
       lang="en"
       className={`${dmSans.variable} ${fraunces.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col font-sans">{children}</body>
+      <body className="min-h-full flex flex-col font-sans">
+        <AuthProvider>{children}</AuthProvider>
+      </body>
     </html>
   );
 }

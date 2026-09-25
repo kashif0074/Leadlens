@@ -1,30 +1,69 @@
 "use client";
 
-import React from 'react';
-import LeadLensLogo from '../common/LeadLensLogo';
+import React from "react";
+import { useSession, signOut } from "next-auth/react";
+import { useRouter } from "next/navigation";
+import Image from "next/image";
+import LeadLensLogo from "../common/LeadLensLogo";
 import { 
   ArrowRight, 
   ShieldCheck, 
   Users, 
   Inbox,
-} from 'lucide-react';
+  LogOut,
+  LayoutDashboard,
+  LogIn
+} from "lucide-react";
 
 interface LandingPageProps {
-  onStartCampaign: () => void;
-  onEnterApp: () => void;
+  onStartCampaign?: () => void;
+  onEnterApp?: () => void;
 }
 
 export default function LandingPage({ onStartCampaign, onEnterApp }: LandingPageProps) {
+  const { data: session, status } = useSession();
+  const router = useRouter();
+
+  const isAuthenticated = status === "authenticated" && Boolean(session?.user);
+
+  const handleStart = () => {
+    if (onStartCampaign) {
+      onStartCampaign();
+      return;
+    }
+    if (isAuthenticated) {
+      router.push("/dashboard?action=new-campaign");
+    } else {
+      router.push("/login?callbackUrl=%2Fdashboard%3Faction%3Dnew-campaign");
+    }
+  };
+
+  const handleEnterWorkspace = () => {
+    if (onEnterApp) {
+      onEnterApp();
+      return;
+    }
+    if (isAuthenticated) {
+      router.push("/dashboard");
+    } else {
+      router.push("/login?callbackUrl=%2Fdashboard");
+    }
+  };
+
+  const handleSignOut = async () => {
+    await signOut({ callbackUrl: "/" });
+  };
+
   return (
     <div className="min-h-screen bg-white text-[#1B2632] flex flex-col justify-between selection:bg-[#045C5C]/20">
       
       {/* Top Navbar */}
-      <header className="px-6 sm:px-12 py-4 flex items-center justify-between border-b border-[#E3E8E7]/60 bg-white/90 backdrop-blur-md sticky top-0 z-30">
+      <header className="px-6 sm:px-12 py-4 sm:py-5 flex items-center justify-between border-b border-[#E3E8E7]/60 bg-white/90 backdrop-blur-md sticky top-0 z-30">
         <div className="flex items-center gap-3">
-          <LeadLensLogo variant="nav" />
+          <LeadLensLogo variant="landing" />
         </div>
 
-        <nav className="hidden md:flex items-center gap-10 text-sm font-medium text-[#5A6672]">
+        <nav className="hidden md:flex items-center gap-8 text-sm font-medium text-[#5A6672]">
           <a href="#how-it-works" className="hover:text-[#045C5C] transition-colors">
             How it works
           </a>
@@ -34,22 +73,78 @@ export default function LandingPage({ onStartCampaign, onEnterApp }: LandingPage
           <a href="#benefits" className="hover:text-[#045C5C] transition-colors">
             Benefits
           </a>
-          <button onClick={onEnterApp} className="hover:text-[#045C5C] transition-colors cursor-pointer">
+          <button 
+            type="button" 
+            onClick={handleEnterWorkspace} 
+            className="hover:text-[#045C5C] transition-colors cursor-pointer"
+          >
             Workspace
           </button>
         </nav>
 
         <div className="flex items-center gap-3">
-          <button
-            onClick={onStartCampaign}
-            className="px-6 py-2.5 rounded-full bg-[#045C5C] hover:bg-[#034A4A] text-white font-semibold text-sm transition-all shadow-xs cursor-pointer flex items-center gap-2"
-          >
-            <span>Get Started</span>
-            <ArrowRight className="w-4 h-4 text-[#BC9747]" />
-          </button>
+          {isAuthenticated ? (
+            <div className="flex items-center gap-3">
+              <div className="hidden sm:flex items-center gap-2">
+                {session?.user?.image ? (
+                  <Image
+                    src={session.user.image}
+                    alt={session.user.name || "User"}
+                    width={32}
+                    height={32}
+                    className="h-8 w-8 rounded-full border border-[#D8E2E1] object-cover"
+                    unoptimized
+                  />
+                ) : (
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#EAF5EF] text-xs font-bold text-[#045C5C]">
+                    {(session?.user?.name || session?.user?.email || "U")[0].toUpperCase()}
+                  </div>
+                )}
+                <span className="text-xs font-semibold text-[#1B2632]">
+                  {session?.user?.name || session?.user?.email}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={handleEnterWorkspace}
+                className="px-4 py-2 rounded-full bg-[#045C5C] hover:bg-[#034A4A] text-white font-semibold text-xs transition-all shadow-xs cursor-pointer flex items-center gap-1.5"
+              >
+                <LayoutDashboard className="w-3.5 h-3.5" />
+                <span>Go to Workspace</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleSignOut}
+                className="p-2 rounded-full border border-[#D8E2E1] text-[#5A6672] hover:text-red-600 hover:border-red-200 transition-colors cursor-pointer"
+                title="Sign out"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => router.push("/login?callbackUrl=%2Fdashboard")}
+                className="px-4 py-2 rounded-full text-xs font-semibold text-[#5A6672] hover:text-[#045C5C] hover:bg-slate-50 transition-colors cursor-pointer flex items-center gap-1.5"
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                <span>Sign in</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleStart}
+                className="px-5 py-2.5 rounded-full bg-[#045C5C] hover:bg-[#034A4A] text-white font-semibold text-xs sm:text-sm transition-all shadow-xs cursor-pointer flex items-center gap-2"
+              >
+                <span>Get Started</span>
+                <ArrowRight className="w-4 h-4 text-[#BC9747]" />
+              </button>
+            </div>
+          )}
         </div>
       </header>
 
+      {/* Hero Section */}
       <section className="max-w-7xl mx-auto w-full px-6 sm:px-12 py-12 lg:py-20 grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-16 items-center">
         
         {/* Left Side: Headline & Copy */}
@@ -68,14 +163,16 @@ export default function LandingPage({ onStartCampaign, onEnterApp }: LandingPage
 
           <div className="pt-2 flex flex-wrap items-center gap-4">
             <button
-              onClick={onStartCampaign}
+              type="button"
+              onClick={handleStart}
               className="px-7 py-3.5 rounded-xl bg-[#045C5C] hover:bg-[#034A4A] text-white font-bold text-sm shadow-sm transition-all cursor-pointer flex items-center gap-2"
             >
               <span>Get Started</span>
               <ArrowRight className="w-4 h-4 text-[#BC9747]" />
             </button>
             <button
-              onClick={onEnterApp}
+              type="button"
+              onClick={handleEnterWorkspace}
               className="px-7 py-3.5 rounded-xl bg-white border border-[#D8E2E1] hover:border-[#1B2632] text-[#1B2632] font-semibold text-sm transition-colors cursor-pointer"
             >
               Explore the workflow
@@ -83,6 +180,7 @@ export default function LandingPage({ onStartCampaign, onEnterApp }: LandingPage
           </div>
         </div>
 
+        {/* Right Side: Visual Preview */}
         <div className="lg:col-span-6 flex justify-center lg:justify-end">
           <div className="w-full max-w-md bg-white rounded-3xl border border-[#E3E8E7] shadow-xl overflow-hidden">
             
@@ -143,7 +241,7 @@ export default function LandingPage({ onStartCampaign, onEnterApp }: LandingPage
 
       </section>
 
-      {/* Section 1: How It Works (Simple 3-Step Guided Workflow) */}
+      {/* Section 1: How It Works */}
       <section id="how-it-works" className="py-16 bg-[#F7F9F9] border-y border-[#E3E8E7]">
         <div className="max-w-7xl mx-auto px-6 sm:px-12">
           
@@ -290,7 +388,8 @@ export default function LandingPage({ onStartCampaign, onEnterApp }: LandingPage
           </p>
           <div className="pt-2">
             <button
-              onClick={onStartCampaign}
+              type="button"
+              onClick={handleStart}
               className="px-8 py-3.5 rounded-full bg-[#045C5C] hover:bg-[#034A4A] text-white font-bold text-sm shadow-md transition-all cursor-pointer inline-flex items-center gap-2"
             >
               <span>Start Campaign</span>

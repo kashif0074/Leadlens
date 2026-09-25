@@ -6,6 +6,7 @@ export const generatedLeadPool: Lead[] = [
     name: "Melissa Grant",
     jobTitle: "Growth Director",
     role: "Director",
+    function: "Marketing & Growth",
     company: "Aster & Co.",
     industry: "Marketing & Agency",
     companySize: "50-100",
@@ -13,6 +14,7 @@ export const generatedLeadPool: Lead[] = [
     state: "Greater London",
     city: "London",
     location: "London, UK",
+    companyHeadquarters: "London, United Kingdom",
     email: "m.grant@asterco.co.uk",
     verificationTag: "Email verified",
     matchReason: "Agency growth leader with a relevant expansion signal.",
@@ -24,6 +26,7 @@ export const generatedLeadPool: Lead[] = [
     name: "Omar Siddiqui",
     jobTitle: "Founder & CEO",
     role: "Executive",
+    function: "Executive Leadership",
     company: "Formstack Labs",
     industry: "Enterprise SaaS",
     companySize: "100-250",
@@ -31,6 +34,7 @@ export const generatedLeadPool: Lead[] = [
     state: "Dubai",
     city: "Dubai",
     location: "Dubai, UAE",
+    companyHeadquarters: "Dubai, United Arab Emirates",
     email: "omar@formstacklabs.io",
     verificationTag: "Enriched",
     matchReason: "Founder-led team seeking qualified sales conversations.",
@@ -42,6 +46,7 @@ export const generatedLeadPool: Lead[] = [
     name: "Sana Ahmed",
     jobTitle: "Managing Partner",
     role: "Executive",
+    function: "Executive Leadership",
     company: "Northstar Talent",
     industry: "Staffing & Recruiting",
     companySize: "10-50",
@@ -49,6 +54,7 @@ export const generatedLeadPool: Lead[] = [
     state: "Sindh",
     city: "Karachi",
     location: "Karachi, PK",
+    companyHeadquarters: "Karachi, Pakistan",
     email: "sana@northstartalent.com",
     verificationTag: "Email verified",
     matchReason: "Recruitment decision-maker with high-fit service motion.",
@@ -60,6 +66,7 @@ export const generatedLeadPool: Lead[] = [
     name: "James Chen",
     jobTitle: "Head of Partnerships",
     role: "Director",
+    function: "Partnerships & Alliances",
     company: "Kindred Studio",
     industry: "Marketing & Agency",
     companySize: "50-100",
@@ -67,6 +74,7 @@ export const generatedLeadPool: Lead[] = [
     state: "Central Region",
     city: "Singapore",
     location: "Singapore",
+    companyHeadquarters: "Singapore, Singapore",
     email: "james.chen@kindredstudio.sg",
     verificationTag: "Review contact",
     matchReason: "Partnership remit aligns with expansion and pipeline goals.",
@@ -78,6 +86,7 @@ export const generatedLeadPool: Lead[] = [
     name: "Sarah Jenkins",
     jobTitle: "VP of Demand Generation",
     role: "Executive",
+    function: "Marketing & Growth",
     company: "CloudScale Inc.",
     industry: "Enterprise SaaS",
     companySize: "250-500",
@@ -85,6 +94,7 @@ export const generatedLeadPool: Lead[] = [
     state: "California",
     city: "San Francisco",
     location: "San Francisco, CA, USA",
+    companyHeadquarters: "San Francisco, United States",
     email: "s.jenkins@cloudscale.io",
     verificationTag: "Email verified",
     matchReason: "Scaling outbound revenue with deliverability safeguards.",
@@ -96,6 +106,7 @@ export const generatedLeadPool: Lead[] = [
     name: "Elena Rostova",
     jobTitle: "Head of Sales Operations",
     role: "Director",
+    function: "Sales & Revenue",
     company: "Nexlify Bio",
     industry: "Healthcare Technology",
     companySize: "100-250",
@@ -103,6 +114,7 @@ export const generatedLeadPool: Lead[] = [
     state: "Berlin",
     city: "Berlin",
     location: "Berlin, Germany",
+    companyHeadquarters: "Berlin, Germany",
     email: "elena@nexlifybio.de",
     verificationTag: "Enriched",
     matchReason: "Leading revenue operations and automated lead workflows.",
@@ -114,6 +126,7 @@ export const generatedLeadPool: Lead[] = [
     name: "David K. Chen",
     jobTitle: "Director of Growth Marketing",
     role: "Director",
+    function: "Marketing & Growth",
     company: "ApexLogistics AI",
     industry: "Supply Chain AI",
     companySize: "100-250",
@@ -121,6 +134,7 @@ export const generatedLeadPool: Lead[] = [
     state: "Texas",
     city: "Austin",
     location: "Austin, TX, USA",
+    companyHeadquarters: "Austin, United States",
     email: "dchen@apexlogistics.ai",
     verificationTag: "Email verified",
     matchReason: "Director evaluating deliverability and automated prospecting.",
@@ -132,6 +146,7 @@ export const generatedLeadPool: Lead[] = [
     name: "Amara Okafor",
     jobTitle: "VP of Strategic Alliances",
     role: "Executive",
+    function: "Partnerships & Alliances",
     company: "SaaSBridge Global",
     industry: "Cloud Infrastructure",
     companySize: "500-1000",
@@ -139,6 +154,7 @@ export const generatedLeadPool: Lead[] = [
     state: "Ontario",
     city: "Toronto",
     location: "Toronto, ON, Canada",
+    companyHeadquarters: "Toronto, Canada",
     email: "amara.o@saasbridge.com",
     verificationTag: "Email verified",
     matchReason: "Scaling ecosystem partnerships with enterprise SaaS buyers.",
@@ -150,6 +166,7 @@ export const generatedLeadPool: Lead[] = [
     name: "Marcus Vance",
     jobTitle: "Managing Director, Commercial",
     role: "Executive",
+    function: "Sales & Revenue",
     company: "Vanguard Growth Partners",
     industry: "Marketing & Agency",
     companySize: "250-500",
@@ -157,6 +174,7 @@ export const generatedLeadPool: Lead[] = [
     state: "New York",
     city: "New York",
     location: "New York, NY, USA",
+    companyHeadquarters: "New York, United States",
     email: "m.vance@vanguardgp.com",
     verificationTag: "Review contact",
     matchReason: "Commercial agency leader actively hiring outbound sales SDRs.",
@@ -168,6 +186,7 @@ export const generatedLeadPool: Lead[] = [
     name: "Sophie Leclerc",
     jobTitle: "VP Revenue Operations",
     role: "Executive",
+    function: "Sales & Revenue",
     company: "Luminary AI",
     industry: "Enterprise SaaS",
     companySize: "100-250",
@@ -175,6 +194,7 @@ export const generatedLeadPool: Lead[] = [
     state: "California",
     city: "San Francisco",
     location: "San Francisco, CA, USA",
+    companyHeadquarters: "San Francisco, United States",
     email: "sleclerc@luminaryai.com",
     verificationTag: "Email verified",
     matchReason: "Focusing on sales inbox deliverability and deliverability guards.",
@@ -185,6 +205,27 @@ export const generatedLeadPool: Lead[] = [
 
 export function leadDomain(lead: Lead) {
   return lead.domain || lead.email.split("@")[1] || "";
+}
+
+export function getLeadFunction(lead: Lead): string {
+  if (lead.function) return lead.function;
+  const title = (lead.jobTitle || "").toLowerCase();
+  if (/growth|demand|marketing|brand|seo|content/.test(title)) return "Marketing & Growth";
+  if (/sales|revenue|revops|account|sdr|bdr|commercial/.test(title)) return "Sales & Revenue";
+  if (/founder|ceo|managing partner|owner|president|co-founder/.test(title)) return "Executive Leadership";
+  if (/partnership|alliances|business development|channel/.test(title)) return "Partnerships & Alliances";
+  if (/operations|ops|logistics|supply chain/.test(title)) return "Operations";
+  if (/engineering|product|cto|cpo|developer|tech/.test(title)) return "Engineering & Product";
+  if (/talent|recruit|people|hr/.test(title)) return "HR & Recruiting";
+  return "General Management";
+}
+
+export function getLeadHeadquarters(lead: Lead): string {
+  if (lead.companyHeadquarters) return lead.companyHeadquarters;
+  if (lead.city && lead.country) return `${lead.city}, ${lead.country}`;
+  if (lead.location) return lead.location;
+  if (lead.country) return lead.country;
+  return "Global";
 }
 
 export function uniqueSorted(values: string[]) {

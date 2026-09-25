@@ -14,11 +14,12 @@ type SequenceItem = {
 interface EmailSequenceModuleProps {
   leads: Lead[];
   provider?: string;
+  sequence?: Array<{ step?: number; delayDays?: number; subject: string; body: string }>;
   onBack: () => void;
   onContinue: () => void;
 }
 
-const initialSequence: SequenceItem[] = [
+const fallbackSequence: SequenceItem[] = [
   {
     label: "First Email",
     subject: "Quick question regarding your pipeline",
@@ -39,8 +40,24 @@ const initialSequence: SequenceItem[] = [
   },
 ];
 
-export default function EmailSequenceModule({ leads, provider, onBack, onContinue }: EmailSequenceModuleProps) {
-  const [sequence, setSequence] = useState(initialSequence);
+export default function EmailSequenceModule({
+  leads,
+  provider,
+  sequence: customSequence,
+  onBack,
+  onContinue,
+}: EmailSequenceModuleProps) {
+  const [sequence, setSequence] = useState<SequenceItem[]>(() => {
+    if (customSequence && customSequence.length > 0) {
+      return customSequence.map((item, index) => ({
+        label: index === 0 ? "First Email" : `Follow-up ${index}`,
+        subject: item.subject,
+        body: item.body,
+        schedule: index === 0 ? "Send immediately after launch" : `${item.delayDays || (index === 1 ? 3 : 5)} days after previous email`,
+      }));
+    }
+    return fallbackSequence;
+  });
   const [editing, setEditing] = useState<number | null>(null);
   const [saved, setSaved] = useState(false);
 

@@ -10,6 +10,7 @@ interface DashboardModuleProps {
   connectedEmail?: string;
   onNavigate: (module: AppModule) => void;
   onOpenNewCampaign: () => void;
+  onSelectCampaign?: (campaignId: string) => void;
 }
 
 export default function DashboardModule({
@@ -19,6 +20,7 @@ export default function DashboardModule({
   connectedEmail,
   onNavigate,
   onOpenNewCampaign,
+  onSelectCampaign,
 }: DashboardModuleProps) {
   const activeCampaign = campaigns.find((campaign) => campaign.id === activeCampaignId) ?? campaigns[0];
   const liveCampaigns = campaigns.filter((campaign) => campaign.status === "Live");
@@ -150,8 +152,15 @@ export default function DashboardModule({
               <button
                 key={campaign.id}
                 type="button"
-                onClick={() => onNavigate("campaign")}
-                className="rounded-2xl border border-line bg-canvas p-4 text-left hover:border-green"
+                onClick={() => {
+                  onSelectCampaign?.(campaign.id);
+                  onNavigate("campaign");
+                }}
+                className={`rounded-2xl border p-4 text-left transition-colors cursor-pointer ${
+                  campaign.id === activeCampaignId
+                    ? "border-green bg-green-soft/30 shadow-xs"
+                    : "border-line bg-canvas hover:border-green"
+                }`}
               >
                 <div className="flex items-center justify-between gap-3">
                   <span className="font-bold text-ink">{campaign.name}</span>

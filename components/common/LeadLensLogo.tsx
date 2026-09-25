@@ -2,11 +2,16 @@ import Image from "next/image";
 
 interface LogoProps {
   className?: string;
-  variant?: "nav" | "sm";
+  variant?: "nav" | "sm" | "landing";
 }
 
 export default function LeadLensLogo({ className = "", variant = "nav" }: LogoProps) {
-  const boxClass = variant === "sm" ? "h-8 w-8" : "h-10 w-[118px]";
+  let boxClass = "h-10 w-[118px]";
+  if (variant === "sm") {
+    boxClass = "h-8 w-8";
+  } else if (variant === "landing") {
+    boxClass = "h-12 w-[144px] sm:h-14 sm:w-[168px]";
+  }
 
   return (
     <div
@@ -18,7 +23,7 @@ export default function LeadLensLogo({ className = "", variant = "nav" }: LogoPr
         alt="LeadLens"
         width={768}
         height={768}
-        priority={variant === "nav"}
+        priority={variant === "nav" || variant === "landing"}
         className="h-full w-full object-contain object-left"
       />
     </div>

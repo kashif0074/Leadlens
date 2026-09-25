@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowRight, Mail, Server, Send, X } from "lucide-react";
+import { ArrowRight, CheckCircle2, Mail, Pencil, Server, Send, X } from "lucide-react";
 import type { Campaign, Lead, SetupStep } from "../../types";
 import LeadManagementView from "../leads/LeadManagementView";
 
@@ -20,7 +20,8 @@ interface CampaignsModuleProps {
   launchContext?: CampaignLaunchContext | null;
   leads: Lead[];
   onOpenNewCampaign: () => void;
-  onLaunch: (payload: { selectedLeadIds: string[]; connectedEmail: string; provider: string }) => void;
+  onAddToConnect: () => void;
+  onLaunch: (payload: { selectedLeadIds: string[]; connectedEmail: string; provider: string }) => Promise<void>;
 }
 
 const steps = ["Leads", "Send emails", "Connect inbox", "Sending", "Warmup", "Review", "Launch"];
@@ -31,6 +32,14 @@ const providers = [
 ];
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+type CampaignEmail = Campaign["sequence"][number];
+
+function createEmailSequence(campaign?: Campaign): CampaignEmail[] {
+  const saved = campaign?.sequence ?? [];
+  return Array.isArray(saved) && saved.length > 0
+    ? saved.map((email, index) => ({ ...email, step: index + 1 }))
+    : [];
+}
 
 export default function CampaignsModule({
   campaigns = [],
@@ -38,28 +47,70 @@ export default function CampaignsModule({
   launchContext,
   leads,
   onOpenNewCampaign,
+  onAddToConnect,
   onLaunch,
 }: CampaignsModuleProps) {
   const campaign = campaigns.find((item) => item.id === activeCampaignId) ?? campaigns[0];
+  const effectiveLeads =
+    leads && leads.length > 0
+      ? leads
+      : ((campaign?.selectedLeads as Lead[]) ?? []);
+
   const [step, setStep] = useState<SetupStep>(0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(
-    () => new Set(launchContext?.selectedLeadIds ?? []),
+    () => new Set(launchContext?.selectedLeadIds ?? campaign?.selectedLeadIds ?? []),
   );
-  const [provider, setProvider] = useState(launchContext?.provider ?? "");
-  const [email, setEmail] = useState(launchContext?.connectedEmail ?? "");
+  const [provider, setProvider] = useState(launchContext?.provider ?? campaign?.provider ?? "");
+  const [email, setEmail] = useState(launchContext?.connectedEmail ?? campaign?.connectedEmail ?? "");
   const [providerModal, setProviderModal] = useState<string | null>(null);
-  const [sendingSaved, setSendingSaved] = useState(false);
-  const [warmupAcknowledged, setWarmupAcknowledged] = useState(false);
+  const [sendingSaved, setSendingSaved] = useState(() => campaign?.status === "Live");
+  const [warmupAcknowledged, setWarmupAcknowledged] = useState(() => campaign?.status === "Live");
   const [toast, setToast] = useState("");
   const [launchError, setLaunchError] = useState("");
+  const [emailSequence, setEmailSequence] = useState<CampaignEmail[]>(() => createEmailSequence(campaign));
+  const [editingEmail, setEditingEmail] = useState<number | null>(null);
+  const [regenerationPrompt, setRegenerationPrompt] = useState("");
+  const [pendingSequence, setPendingSequence] = useState<CampaignEmail[] | null>(null);
+  const [pendingPersonalizedEmails, setPendingPersonalizedEmails] = useState<Campaign["personalizedEmails"]>();
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generationError, setGenerationError] = useState("");
 
   useEffect(() => {
-    if (launchContext?.selectedLeadIds?.length) {
-      setSelectedIds(new Set(launchContext.selectedLeadIds));
-    }
-    if (launchContext?.connectedEmail) setEmail(launchContext.connectedEmail);
-    if (launchContext?.provider) setProvider(launchContext.provider);
+    const syncContext = window.setTimeout(() => {
+      if (launchContext?.selectedLeadIds?.length) {
+        setSelectedIds(new Set(launchContext.selectedLeadIds));
+      }
+      if (launchContext?.connectedEmail) setEmail(launchContext.connectedEmail);
+      if (launchContext?.provider) setProvider(launchContext.provider);
+    }, 0);
+    return () => window.clearTimeout(syncContext);
   }, [launchContext]);
+
+  useEffect(() => {
+    if (campaign?.sequence && Array.isArray(campaign.sequence) && campaign.sequence.length > 0) {
+      const syncSequence = window.setTimeout(
+        () => setEmailSequence(campaign.sequence.map((email, index) => ({ ...email, step: index + 1 }))),
+        0,
+      );
+      return () => window.clearTimeout(syncSequence);
+    }
+  }, [campaign?.id, campaign?.sequence]);
+
+  useEffect(() => {
+    if (campaign?.selectedLeadIds && Array.isArray(campaign.selectedLeadIds) && (!launchContext?.selectedLeadIds || launchContext.selectedLeadIds.length === 0)) {
+      setSelectedIds(new Set(campaign.selectedLeadIds as string[]));
+    }
+    if (campaign?.connectedEmail && !launchContext?.connectedEmail) {
+      setEmail(campaign.connectedEmail);
+    }
+    if (campaign?.provider && !launchContext?.provider) {
+      setProvider(campaign.provider);
+    }
+    if (campaign?.status === "Live") {
+      setSendingSaved(true);
+      setWarmupAcknowledged(true);
+    }
+  }, [campaign?.id, campaign?.selectedLeadIds, campaign?.connectedEmail, campaign?.provider, campaign?.status, launchContext]);
 
   const notify = (message: string) => {
     setToast(message);
@@ -98,19 +149,70 @@ export default function CampaignsModule({
     setStep(next);
   };
 
-  const handleLaunch = () => {
+  const handleLaunch = async () => {
     if (!canReview) {
       setLaunchError("Complete lead selection, inbox, sending preferences, and warmup before launching.");
       return;
     }
-    onLaunch({
-      selectedLeadIds: Array.from(selectedIds),
-      connectedEmail: email.trim(),
-      provider,
-    });
+    try {
+      await onLaunch({
+        selectedLeadIds: Array.from(selectedIds),
+        connectedEmail: email.trim(),
+        provider,
+      });
+    } catch (error) {
+      setLaunchError(error instanceof Error ? error.message : "Unable to launch campaign.");
+    }
   };
 
-  if (!campaign && leads.length === 0) {
+  const saveEmailSequence = async (next: CampaignEmail[], personalizedEmails = campaign?.personalizedEmails) => {
+    setEmailSequence(next);
+    if (!campaign?.id) return;
+    try {
+      const response = await fetch("/api/campaigns/generate", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ campaignId: campaign.id, sequence: next, personalizedEmails, selectedLeadIds: Array.from(selectedIds), connectedEmail: email.trim(), provider }),
+      });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(result.error ?? "Unable to save the email sequence.");
+      notify("Email sequence saved.");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Unable to save the email sequence.");
+    }
+  };
+
+  const generateReplacement = async () => {
+    const instruction = regenerationPrompt.trim();
+    if (!instruction) {
+      notify("Enter an instruction before regenerating.");
+      return;
+    }
+    if (!campaign?.id) {
+      notify("Save the campaign before regenerating emails.");
+      return;
+    }
+    setIsGenerating(true);
+    setGenerationError("");
+    try {
+      const selectedLeads = effectiveLeads.filter((lead) => selectedIds.has(lead.id));
+      const response = await fetch("/api/campaigns/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ campaignId: campaign.id, prompt: brief, name: activeCampaignName, selectedLeadIds: Array.from(selectedIds), selectedLeads, instruction, currentSequence: emailSequence, preview: true }),
+      });
+      const result = (await response.json()) as { campaign?: Campaign; error?: string };
+      if (!response.ok || !result.campaign) throw new Error(result.error ?? "Unable to regenerate the campaign.");
+      setPendingSequence(result.campaign.sequence);
+      setPendingPersonalizedEmails(result.campaign.personalizedEmails);
+    } catch (error) {
+      setGenerationError(error instanceof Error ? error.message : "Unable to regenerate the campaign.");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  if (!campaign && effectiveLeads.length === 0) {
     return (
       <div className="surface panel max-w-3xl">
         <p className="eyebrow">Campaigns</p>
@@ -166,10 +268,10 @@ export default function CampaignsModule({
               <h2 className="mt-1 text-2xl font-bold">Review your matching audience.</h2>
               <p className="mt-2 text-sm text-muted">Search and filter the loaded lead list, then select who belongs in this campaign.</p>
             </div>
-            <span className="status good">{leads.length} loaded leads</span>
+            <span className="status good">{effectiveLeads.length} loaded leads</span>
           </div>
           <LeadManagementView
-            leads={leads}
+            leads={effectiveLeads}
             selectedLeadIds={selectedIds}
             onToggleLead={(id) => {
               const next = new Set(selectedIds);
@@ -179,6 +281,7 @@ export default function CampaignsModule({
             }}
             onSelectAll={(ids = leads.map((lead) => lead.id)) => setSelectedIds(new Set(ids))}
             onClearAll={() => setSelectedIds(new Set())}
+            onAddToConnect={onAddToConnect}
             onContinue={() => goTo(1)}
             continueLabel="Continue to campaign setup"
           />
@@ -186,20 +289,78 @@ export default function CampaignsModule({
       )}
 
       {step === 1 && (
-        <SetupCard eyebrow="Send emails review" title="Confirm the audience before connecting an inbox." description="This step does not send email. It confirms the selected leads and campaign brief.">
-          <div className="mt-5 grid gap-4 md:grid-cols-2">
-            <div className="rounded-xl bg-green-soft p-4">
+        <div className="grid items-start gap-5 2xl:grid-cols-[minmax(220px,0.8fr)_minmax(420px,1.45fr)_minmax(260px,0.85fr)]">
+          <section className="surface panel !max-w-none">
+            <div className="mt-5 rounded-xl bg-green-soft p-4">
               <strong>Selected audience</strong>
               <p className="mt-2 text-2xl font-bold text-green">{selectedIds.size} selected leads</p>
               <p className="mt-2 text-sm text-muted">Only selected contacts will be included at launch.</p>
             </div>
-            <div className="rounded-xl border border-line bg-canvas p-4">
-              <strong>Campaign prompt</strong>
-              <p className="mt-2 text-sm text-muted">{brief || "No brief saved yet."}</p>
+          </section>
+
+          <section className="surface panel !max-w-none">
+            <p className="eyebrow">Email sequence</p>
+            <h2 className="mt-2 text-xl font-bold">Review your generated emails</h2>
+            <p className="mt-2 text-sm text-muted">Personalized using the saved campaign context and selected lead data.</p>
+            {!emailSequence.length && <p className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">No generated email sequence is saved for this campaign.</p>}
+            <div className="mt-5 space-y-4">
+              {emailSequence.map((email, index) => (
+                <article key={email.step} className="rounded-xl border border-line bg-white p-4">
+                  <div className="flex items-center justify-between gap-3 border-b border-line pb-3">
+                    <div>
+                      <span className="status good">{index === 0 ? "Initial Email" : `Follow-up ${index}`}</span>
+                      <p className="mt-2 text-xs text-muted">{index === 0 ? "Send after launch" : `${email.delayDays} days after previous email`}</p>
+                    </div>
+                    <button className="btn btn-secondary text-xs" type="button" onClick={() => setEditingEmail(editingEmail === index ? null : index)}>
+                      <Pencil className="h-3.5 w-3.5" /> {editingEmail === index ? "Close" : "Edit"}
+                    </button>
+                  </div>
+                  {editingEmail === index ? (
+                    <div className="mt-4 grid gap-3">
+                      <label className="text-sm font-semibold">Subject<input className="input mt-2" value={email.subject} onChange={(event) => setEmailSequence((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, subject: event.target.value, manuallyEdited: true } : item))} /></label>
+                      <label className="text-sm font-semibold">Body<textarea className="input mt-2 min-h-28" value={email.body} onChange={(event) => setEmailSequence((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, body: event.target.value, manuallyEdited: true } : item))} /></label>
+                      <button className="btn btn-primary justify-self-start text-xs" type="button" onClick={() => { saveEmailSequence(emailSequence); setEditingEmail(null); }}>Save email</button>
+                    </div>
+                  ) : (
+                    <div className="mt-4 space-y-3">
+                      <div><p className="text-[11px] font-bold uppercase tracking-wider text-muted">Subject</p><p className="mt-1 text-sm font-bold">{email.subject}</p></div>
+                      <div><p className="text-[11px] font-bold uppercase tracking-wider text-muted">Body</p><p className="mt-1 whitespace-pre-line rounded-lg bg-mist p-3 text-sm leading-relaxed">{email.body}</p></div>
+                      <div><p className="text-[11px] font-bold uppercase tracking-wider text-muted">Recipients</p><p className="mt-1 text-sm">{effectiveLeads.filter((lead) => selectedIds.has(lead.id)).map((lead) => lead.name).join(", ") || "Selected leads"}</p></div>
+                    </div>
+                  )}
+                  <div className="mt-3 flex items-center gap-2 border-t border-line pt-3 text-xs text-muted"><CheckCircle2 className="h-4 w-4 text-green" /> Saved to campaign</div>
+                </article>
+              ))}
             </div>
+          </section>
+
+          <section className="surface panel !max-w-none">
+            <p className="eyebrow">Regenerate campaign</p>
+            <h2 className="mt-2 text-xl font-bold">Improve the sequence</h2>
+            <p className="mt-2 text-sm text-muted">Keep the original campaign context and add an instruction for the updated emails.</p>
+            <label className="mt-5 block text-sm font-semibold">
+              New instructions
+              <textarea className="input mt-2 min-h-32" value={regenerationPrompt} onChange={(event) => setRegenerationPrompt(event.target.value)} placeholder="Make this email shorter and more professional." />
+            </label>
+            <button className="btn btn-primary mt-4 w-full" type="button" onClick={generateReplacement} disabled={isGenerating}>{isGenerating ? "Generating with Groq..." : "Regenerate Campaign"}</button>
+            {generationError && <p className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{generationError}</p>}
+            {pendingSequence && (
+              <div className="mt-5 rounded-xl border border-green/20 bg-green-soft p-4">
+                <p className="text-sm font-bold">Generated result ready for review</p>
+                <p className="mt-2 text-xs text-muted">{pendingSequence[0].subject}</p>
+                <p className="mt-2 whitespace-pre-line text-sm">{pendingSequence[0].body}</p>
+                <div className="mt-4 grid gap-2">
+                  <button className="btn btn-primary w-full text-xs" type="button" onClick={() => { void saveEmailSequence(pendingSequence, pendingPersonalizedEmails); setPendingSequence(null); setPendingPersonalizedEmails(undefined); setRegenerationPrompt(""); }}>Confirm and replace emails</button>
+                  <button className="btn btn-secondary w-full text-xs" type="button" onClick={() => { setPendingSequence(null); setPendingPersonalizedEmails(undefined); }}>Discard preview</button>
+                </div>
+              </div>
+            )}
+          </section>
+
+          <div className="2xl:col-span-3">
+            <CardActions onBack={() => setStep(0)} onNext={() => setStep(2)} nextLabel="Connect inbox" />
           </div>
-          <CardActions onBack={() => setStep(0)} onNext={() => setStep(2)} nextLabel="Connect inbox" />
-        </SetupCard>
+        </div>
       )}
 
       {step === 2 && (

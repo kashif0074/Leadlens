@@ -7,11 +7,14 @@ import LeadManagementView from "../leads/LeadManagementView";
 interface LeadsModuleProps {
   leads: Lead[];
   connectedEmail?: string;
+  initialSelectedIds?: string[];
   onSendMail?: (selectedLeads: Lead[]) => void;
 }
 
-export default function LeadsModule({ leads, connectedEmail, onSendMail }: LeadsModuleProps) {
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+export default function LeadsModule({ leads, connectedEmail, initialSelectedIds, onSendMail }: LeadsModuleProps) {
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(
+    () => new Set(initialSelectedIds && initialSelectedIds.length > 0 ? initialSelectedIds : leads.map((l) => l.id)),
+  );
   const [feedback, setFeedback] = useState("");
 
   const toggleLead = (id: string) => {

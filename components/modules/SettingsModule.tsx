@@ -1,17 +1,25 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle2, Save, ShieldCheck } from "lucide-react";
+import Image from "next/image";
+import { useSession } from "next-auth/react";
+import { CheckCircle2, Save, ShieldCheck, UserCheck } from "lucide-react";
 
 interface SettingsModuleProps {
   connectedEmail?: string;
 }
 
 export default function SettingsModule({ connectedEmail }: SettingsModuleProps) {
+  const { data: session } = useSession();
   const [workspaceName, setWorkspaceName] = useState("LeadLens campaign command");
   const [dailyLimit, setDailyLimit] = useState("38");
   const [sendingWindow, setSendingWindow] = useState("Mon–Fri · 09:00–16:00 PKT");
   const [saved, setSaved] = useState(false);
+
+  const userName = session?.user?.name || session?.user?.email || "LeadLens User";
+  const userEmail = session?.user?.email || "";
+  const userImage = session?.user?.image;
+  const initial = (userName[0] || "U").toUpperCase();
 
   const handleSave = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -22,10 +30,57 @@ export default function SettingsModule({ connectedEmail }: SettingsModuleProps) 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6">
       <header>
-        <p className="eyebrow">Workspace control</p>
-        <h1 className="mt-2 font-serif text-3xl font-bold">Settings</h1>
-        <p className="mt-2 text-sm text-muted">Manage workspace identity and the sending safeguards used by your campaigns.</p>
+        <p className="eyebrow">Account & Workspace</p>
+        <h1 className="mt-2 font-serif text-3xl font-bold">Profile & Settings</h1>
+        <p className="mt-2 text-sm text-muted">View your authenticated profile and configure workspace delivery safeguards.</p>
       </header>
+
+      {/* Profile Details Section */}
+      <section className="surface rounded-3xl p-6 sm:p-7 border border-line bg-white shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-5 border-b border-line pb-6">
+          <div className="flex items-center gap-4">
+            {userImage ? (
+              <Image
+                src={userImage}
+                alt={userName}
+                width={56}
+                height={56}
+                className="h-14 w-14 rounded-full border border-line object-cover"
+                unoptimized
+              />
+            ) : (
+              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-green-soft text-lg font-bold text-green">
+                {initial}
+              </div>
+            )}
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-xl font-bold text-ink">{userName}</h2>
+                <span className="inline-flex items-center gap-1 rounded-full bg-green-soft px-2.5 py-0.5 text-[11px] font-bold text-green">
+                  <UserCheck className="h-3 w-3" /> Google Authenticated
+                </span>
+              </div>
+              <p className="text-sm text-muted mt-0.5">{userEmail}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-3 mt-6">
+          <div className="rounded-2xl border border-line bg-canvas p-4">
+            <span className="text-xs font-semibold text-muted">Authentication Provider</span>
+            <p className="mt-1 text-sm font-bold text-ink">Google OAuth 2.0</p>
+          </div>
+          <div className="rounded-2xl border border-line bg-canvas p-4">
+            <span className="text-xs font-semibold text-muted">User ID</span>
+            <p className="mt-1 truncate text-xs font-mono text-ink">{session?.user?.id || "oauth-synced"}</p>
+          </div>
+          <div className="rounded-2xl border border-line bg-canvas p-4">
+            <span className="text-xs font-semibold text-muted">Database Storage</span>
+            <p className="mt-1 text-sm font-bold text-green">Persisted in MySQL</p>
+          </div>
+        </div>
+      </section>
+
       <form onSubmit={handleSave} className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
         <section className="surface rounded-3xl p-6">
           <p className="eyebrow">Workspace</p>
@@ -37,7 +92,7 @@ export default function SettingsModule({ connectedEmail }: SettingsModuleProps) 
             </label>
             <label className="block text-sm font-bold">
               Saved sending email
-              <input className="input mt-2" value={connectedEmail ?? ""} readOnly placeholder="Save an inbox during campaign setup" />
+              <input className="input mt-2" value={connectedEmail ?? userEmail} readOnly placeholder="Save an inbox during campaign setup" />
             </label>
             <label className="block text-sm font-bold">
               Default daily sending limit
@@ -66,7 +121,7 @@ export default function SettingsModule({ connectedEmail }: SettingsModuleProps) 
           </div>
           <div className="mt-5 rounded-xl bg-green-soft p-4 text-sm text-green-dark">
             <ShieldCheck className="mr-2 inline h-4 w-4" />
-            Settings save in this browser session only.
+            Safeguards applied to all outbound campaigns.
           </div>
         </section>
         <div className="flex flex-wrap items-center justify-between gap-3 lg:col-span-2">
@@ -78,7 +133,7 @@ export default function SettingsModule({ connectedEmail }: SettingsModuleProps) 
               </>
             )}
           </span>
-          <button type="submit" className="btn btn-primary">
+          <button type="submit" className="btn btn-primary cursor-pointer">
             <Save className="h-4 w-4" />
             Save changes
           </button>

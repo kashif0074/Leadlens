@@ -53,6 +53,23 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+button,
+a,
+input,
+select,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid rgba(0, 103, 95, 0.28);
+  outline-offset: 2px;
+}
+
 /* Custom scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
@@ -210,10 +227,28 @@ body {
   background: white;
   padding: 8px;
   color: #466158;
+  transition: background 0.18s, border-color 0.18s, color 0.18s;
+}
+
+.icon-btn:hover {
+  border-color: #b7d7c7;
+  background: var(--green-soft);
+  color: var(--green);
 }
 
 @media (max-width: 767px) {
   .panel {
     padding: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

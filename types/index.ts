@@ -3,6 +3,7 @@ export type Lead = {
   name: string;
   jobTitle: string;
   role: 'Executive' | 'Director' | 'Manager' | 'Individual Contributor';
+  function?: string;
   company: string;
   industry: string;
   companySize: string;
@@ -10,6 +11,7 @@ export type Lead = {
   state: string;
   city: string;
   location: string;
+  companyHeadquarters?: string;
   email: string;
   domain?: string;
   verificationTag: 'Email verified' | 'Enriched' | 'Review contact';
@@ -20,17 +22,31 @@ export type Lead = {
 
 export type Campaign = {
   id: string;
+  userId?: string | null;
   name: string;
   brief: string;
+  prompt?: string;
+  selectedLeadIds?: string[];
+  selectedLeads?: Lead[];
+  connectedEmail?: string | null;
+  provider?: string | null;
   status: 'Draft saved' | 'Live' | 'Ready';
   leadsCount: number;
   sentCount: number;
   replyRate: number;
+  personalizedEmails?: Record<string, {
+    step: number;
+    delayDays: number;
+    subject: string;
+    body: string;
+    manuallyEdited?: boolean;
+  }[]>;
   sequence: {
     step: number;
     delayDays: number;
     subject: string;
     body: string;
+    manuallyEdited?: boolean;
   }[];
 };
 
