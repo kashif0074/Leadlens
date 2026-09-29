@@ -19,6 +19,43 @@ to the next key for rate limits, token limits, authentication failures, or
 provider/network errors. Keep all values in `.env` and never expose them to
 the browser.
 
+## Gmail sending accounts
+
+Each user connects their own Gmail account with a Google App Password. The
+account must have 2-Step Verification enabled; create the 16-character App
+Password at [Google Account App Passwords](https://myaccount.google.com/apppasswords).
+Do not use or store the account's regular Google password.
+
+Set `ENCRYPTION_KEY` in `.env` to a randomly generated 32-byte hexadecimal key:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+Keep this key private and backed up: saved Gmail credentials cannot be
+decrypted if the key is lost or rotated. Apply the `EmailAccount` migration
+before starting the app with `npx prisma migrate deploy`.
+
+## Sending-domain authentication
+
+LeadLens sends through the connected Gmail account and uses that mailbox for
+both `From` and `Reply-To`. For a consumer `@gmail.com` address, Google manages
+the sending-domain authentication. For a Google Workspace custom domain, the
+domain owner must authorize Google in SPF, enable DKIM signing in the Workspace
+admin console and publish Google's DKIM selector, and publish a DMARC record
+for the visible From domain. Keep a single SPF record and merge authorized
+senders into it. DNS hosting and propagation are outside LeadLens; the app does
+not inspect or verify SPF, DKIM, or DMARC records.
+
+Set `NEXTAUTH_URL` to the public HTTPS application URL in production. Campaign
+messages include a one-click unsubscribe link, and LeadLens suppresses opted-out
+addresses for that user across their campaigns. Do not send unsolicited mail;
+collect only contacts you have an appropriate legal basis to contact. The
+per-launch and rolling 24-hour caps reduce volume spikes but cannot guarantee
+Primary Inbox placement. Gmail SMTP confirms acceptance or immediate rejection;
+this app does not receive later bounce notifications from Gmail, so monitor the
+mailbox for post-acceptance bounces.
+
 ## Validation
 
 ```bash

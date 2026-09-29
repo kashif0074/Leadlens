@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { useSession, signIn } from "next-auth/react";
 import { ArrowLeft, ArrowRight, Check, Loader2, Sparkles, AlertCircle, RotateCcw } from "lucide-react";
-import { leadDomain } from "../../lib/leads";
+import { leadDomain } from "../../lib/leadDisplay";
 import type { Lead } from "../../types";
 import LeadLensLogo from "../common/LeadLensLogo";
 

@@ -12,8 +12,6 @@ interface SettingsModuleProps {
 export default function SettingsModule({ connectedEmail }: SettingsModuleProps) {
   const { data: session } = useSession();
   const [workspaceName, setWorkspaceName] = useState("LeadLens campaign command");
-  const [dailyLimit, setDailyLimit] = useState("38");
-  const [sendingWindow, setSendingWindow] = useState("Mon–Fri · 09:00–16:00 PKT");
   const [saved, setSaved] = useState(false);
 
   const userName = session?.user?.name || session?.user?.email || "LeadLens User";
@@ -95,33 +93,23 @@ export default function SettingsModule({ connectedEmail }: SettingsModuleProps) 
               <input className="input mt-2" value={connectedEmail ?? userEmail} readOnly placeholder="Save an inbox during campaign setup" />
             </label>
             <label className="block text-sm font-bold">
-              Default daily sending limit
-              <select className="input mt-2" value={dailyLimit} onChange={(event) => setDailyLimit(event.target.value)}>
-                <option value="25">25 emails / day</option>
-                <option value="38">38 emails / day</option>
-                <option value="50">50 emails / day</option>
-              </select>
+              Enforced sending cap
+              <input className="input mt-2" value="10 per launch · 50 per rolling 24 hours per Gmail account" readOnly />
             </label>
-            <label className="block text-sm font-bold">
-              Default sending window
-              <select className="input mt-2" value={sendingWindow} onChange={(event) => setSendingWindow(event.target.value)}>
-                <option>Mon–Fri · 09:00–16:00 PKT</option>
-                <option>Mon–Fri · 10:00–17:00 PKT</option>
-              </select>
-            </label>
+            <p className="text-xs leading-relaxed text-muted">SMTP acceptance confirms Gmail accepted a message for processing; it does not confirm Primary Inbox placement.</p>
           </div>
         </section>
         <section className="surface rounded-3xl p-6">
           <p className="eyebrow">Safety & data</p>
           <h2 className="mt-2 text-xl font-bold">Deliverability controls</h2>
           <div className="mt-5 space-y-3">
-            <SettingRow title="Warmup safeguards" description="Require inbox warmup confirmation before launch." />
-            <SettingRow title="Suppression checks" description="Respect bounced and opted-out contacts." />
-            <SettingRow title="Review before launch" description="Keep the final campaign checkpoint enabled." />
+            <SettingRow title="Recipient opt-outs" description="LeadLens blocks addresses that unsubscribe through campaign links." status="Enforced" />
+            <SettingRow title="SPF, DKIM, and DMARC" description="Publish these records with your sending-domain DNS provider; LeadLens cannot configure or verify them." status="External DNS" />
+            <SettingRow title="Gmail bounce reports" description="SMTP reports immediate rejection only. Later Gmail bounce notifications are not monitored by this app." status="Not monitored" />
           </div>
           <div className="mt-5 rounded-xl bg-green-soft p-4 text-sm text-green-dark">
             <ShieldCheck className="mr-2 inline h-4 w-4" />
-            Safeguards applied to all outbound campaigns.
+            Outbound messages use your verified Gmail address for From and Reply-To.
           </div>
         </section>
         <div className="flex flex-wrap items-center justify-between gap-3 lg:col-span-2">
@@ -143,14 +131,14 @@ export default function SettingsModule({ connectedEmail }: SettingsModuleProps) 
   );
 }
 
-function SettingRow({ title, description }: { title: string; description: string }) {
+function SettingRow({ title, description, status }: { title: string; description: string; status: string }) {
   return (
     <div className="flex items-start justify-between gap-4 rounded-xl border border-line bg-canvas p-3">
       <div>
         <p className="text-sm font-bold">{title}</p>
         <p className="mt-1 text-xs text-muted">{description}</p>
       </div>
-      <span className="status good">Enabled</span>
+      <span className={`status ${status === "Enforced" ? "good" : "warn"}`}>{status}</span>
     </div>
   );
 }

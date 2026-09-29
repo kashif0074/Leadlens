@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import type { Lead } from "../../types";
-import { leadDomain, getLeadFunction, getLeadHeadquarters } from "../../lib/leads";
+import { leadDomain, getLeadFunction, getLeadHeadquarters, getLeadLinkedInUrl } from "../../lib/leadDisplay";
 import {
   Search,
   SlidersHorizontal,
@@ -19,7 +19,18 @@ import {
   X,
   Layers,
   Award,
+  Mail,
+  Sparkles,
+  Globe,
+  ExternalLink,
 } from "lucide-react";
+
+function getInitials(name: string): string {
+  if (!name) return "L";
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
 
 interface LeadManagementViewProps {
   leads: Lead[];
@@ -175,6 +186,65 @@ export default function LeadManagementView({
   // Mobile / drawer state
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [activeDrawerLead, setActiveDrawerLead] = useState<Lead | null>(null);
+
+  // Hover Popover State
+  const [hoveredLead, setHoveredLead] = useState<Lead | null>(null);
+  const [popoverPos, setPopoverPos] = useState<{ top: number; left: number } | null>(null);
+  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleRowMouseEnter = (lead: Lead, event: React.MouseEvent<HTMLTableRowElement>) => {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+    const target = event.currentTarget;
+    const rect = target.getBoundingClientRect();
+    const popoverWidth = 420;
+    const popoverEstimatedHeight = 280;
+
+    // Horizontal placement with viewport clamping
+    let left = rect.left + 50;
+    if (left + popoverWidth > window.innerWidth - 20) {
+      left = window.innerWidth - popoverWidth - 20;
+    }
+    if (left < 16) left = 16;
+
+    // Vertical placement: flip above if close to bottom
+    const spaceBelow = window.innerHeight - rect.bottom;
+    let top: number;
+    if (spaceBelow >= popoverEstimatedHeight + 10 || spaceBelow >= rect.top) {
+      top = rect.bottom + 8;
+      if (top + popoverEstimatedHeight > window.innerHeight - 10) {
+        top = Math.max(10, window.innerHeight - popoverEstimatedHeight - 10);
+      }
+    } else {
+      top = Math.max(10, rect.top - popoverEstimatedHeight - 8);
+    }
+
+    setPopoverPos({ top, left });
+    setHoveredLead(lead);
+  };
+
+  const handleRowMouseLeave = () => {
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+    hoverTimeoutRef.current = setTimeout(() => {
+      setHoveredLead(null);
+      setPopoverPos(null);
+    }, 120);
+  };
+
+  // Dismiss popover on scroll to prevent detached overlays
+  useEffect(() => {
+    const handleScroll = () => {
+      setHoveredLead(null);
+      setPopoverPos(null);
+    };
+    window.addEventListener("scroll", handleScroll, true);
+    return () => {
+      window.removeEventListener("scroll", handleScroll, true);
+      if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+    };
+  }, []);
 
   // Toggle filter section collapse
   const toggleSection = (section: string) => {
@@ -922,127 +992,128 @@ export default function LeadManagementView({
           </div>
 
           {/* Table Container */}
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[1100px] border-collapse text-left text-xs">
-              <thead className="border-b border-line bg-canvas font-semibold text-muted">
+          <div className="overflow-x-auto rounded-3xl border border-line bg-white shadow-[0_4px_24px_rgba(0,0,0,0.03)]">
+            <table className="w-full min-w-[960px] border-collapse text-left text-xs">
+              <thead className="border-b border-line bg-mist/60 text-[11px] font-bold uppercase tracking-wider text-muted/90">
                 <tr>
-                  <th className="w-12 p-4 text-center">
-                    <input
-                      type="checkbox"
-                      checked={allFilteredSelected}
-                      onChange={() => {
-                        if (allFilteredSelected) {
-                          onSelectAll(
-                            [...selectedLeadIds].filter((id) => !filteredIds.includes(id)),
-                          );
-                          return;
-                        }
-                        onSelectAll([...new Set([...selectedLeadIds, ...filteredIds])]);
-                      }}
-                      disabled={!filteredLeads.length}
-                      className="h-4 w-4 cursor-pointer accent-green"
-                      aria-label="Select all visible leads"
-                    />
+                  <th className="w-12 py-3.5 pl-4 pr-2 text-center">
+                    <div className="flex items-center justify-center">
+                      <input
+                        type="checkbox"
+                        checked={allFilteredSelected}
+                        onChange={() => {
+                          if (allFilteredSelected) {
+                            onSelectAll(
+                              [...selectedLeadIds].filter((id) => !filteredIds.includes(id)),
+                            );
+                            return;
+                          }
+                          onSelectAll([...new Set([...selectedLeadIds, ...filteredIds])]);
+                        }}
+                        disabled={!filteredLeads.length}
+                        className="h-4 w-4 rounded border-line text-green accent-green cursor-pointer transition-transform hover:scale-105"
+                        aria-label="Select all visible leads"
+                      />
+                    </div>
                   </th>
-                  <th className="p-4">Lead</th>
-                  <th className="p-4">Seniority & Title</th>
-                  <th className="p-4">Function</th>
-                  <th className="p-4">Company</th>
-                  <th className="p-4">HQ & Location</th>
-                  <th className="p-4">Industry</th>
-                  <th className="p-4">Email status</th>
-                  <th className="p-4 text-right">Match</th>
-                  <th className="w-12 p-4 text-center">Inspect</th>
+                  <th className="py-3.5 px-4 font-bold text-ink/80">Person</th>
+                  <th className="py-3.5 px-4 font-bold text-ink/80">Role</th>
+                  <th className="py-3.5 px-4 font-bold text-ink/80">Company</th>
+                  <th className="py-3.5 px-4 font-bold text-ink/80">Email</th>
+                  <th className="py-3.5 px-4 font-bold text-ink/80">LinkedIn Profile</th>
+                  <th className="py-3.5 px-4 font-bold text-ink/80">Industry</th>
+                  <th className="py-3.5 px-4 font-bold text-ink/80">Location</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-line">
+              <tbody className="divide-y divide-line/60">
                 {filteredLeads.map((lead) => {
                   const checked = selectedLeadIds.has(lead.id);
-                  const fn = getLeadFunction(lead);
-                  const hq = getLeadHeadquarters(lead);
+                  const initials = getInitials(lead.name);
+                  const linkedinUrl = getLeadLinkedInUrl(lead);
 
                   return (
                     <tr
                       key={lead.id}
                       onClick={() => onToggleLead(lead.id)}
-                      className={`h-16 cursor-pointer hover:bg-canvas transition-colors ${
-                        checked ? "bg-green-soft/40" : "bg-white"
+                      onMouseEnter={(e) => handleRowMouseEnter(lead, e)}
+                      onMouseLeave={handleRowMouseLeave}
+                      className={`group relative cursor-pointer transition-all duration-150 ease-out ${
+                        checked
+                          ? "bg-green-soft/40 hover:bg-green-soft/60"
+                          : "bg-white hover:bg-mist/40"
                       }`}
                     >
-                      <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => onToggleLead(lead.id)}
-                          className="h-4 w-4 cursor-pointer accent-green"
-                          aria-label={`Select ${lead.name}`}
-                        />
+                      <td className="w-12 py-3.5 pl-4 pr-2 text-center relative" onClick={(e) => e.stopPropagation()}>
+                        {checked && (
+                          <div className="absolute left-0 top-2 bottom-2 w-1 rounded-r-full bg-green" />
+                        )}
+                        <div className="flex items-center justify-center">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => onToggleLead(lead.id)}
+                            className="h-4 w-4 rounded border-line text-green accent-green cursor-pointer transition-transform hover:scale-105"
+                            aria-label={`Select ${lead.name}`}
+                          />
+                        </div>
                       </td>
-                      <td className="p-4">
-                        <div className="font-bold text-sm text-ink">{lead.name}</div>
-                        <div className="text-[11px] text-muted">{lead.email}</div>
-                      </td>
-                      <td className="p-4">
-                        <div className="font-semibold text-ink">{lead.jobTitle}</div>
-                        <div className="inline-flex items-center gap-1 text-[11px] text-muted">
-                          <span className="rounded bg-mist px-1.5 py-0.2 font-medium">
-                            {lead.role}
+                      <td className="py-3.5 px-4 whitespace-nowrap">
+                        <div className="flex items-center gap-2.5">
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-green-soft to-sage border border-green/20 font-bold text-xs text-green-dark shadow-2xs group-hover:border-green/40 group-hover:scale-105 transition-all">
+                            {initials}
+                          </div>
+                          <span className="font-semibold text-sm text-ink group-hover:text-green transition-colors">
+                            {lead.name}
                           </span>
                         </div>
                       </td>
-                      <td className="p-4">
-                        <span className="rounded-full bg-mist border border-line px-2.5 py-1 text-[11px] font-semibold text-ink">
-                          {fn}
+                      <td className="py-3.5 px-4 whitespace-nowrap">
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-mist/80 text-ink/90 border border-line/60 shadow-2xs">
+                          {lead.jobTitle || lead.role}
                         </span>
                       </td>
-                      <td className="p-4">
-                        <div className="font-semibold text-ink">{lead.company}</div>
-                        <div className="text-[11px] text-muted">{lead.companySize} emp</div>
-                      </td>
-                      <td className="p-4 text-muted">
-                        <div className="inline-flex items-center gap-1 font-medium text-ink">
-                          <Building2 className="h-3 w-3 text-muted shrink-0" />
-                          <span>{hq}</span>
+                      <td className="py-3.5 px-4 whitespace-nowrap">
+                        <div className="flex items-center gap-2">
+                          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-mist border border-line/60 text-green-dark/70 shadow-2xs">
+                            <Building2 className="h-3 w-3" />
+                          </div>
+                          <span className="font-medium text-xs sm:text-sm text-ink truncate">
+                            {lead.company}
+                          </span>
                         </div>
-                        <div className="text-[11px] text-muted flex items-center gap-1 mt-0.5">
-                          <MapPin className="h-3 w-3 text-gold shrink-0" />
+                      </td>
+                      <td className="py-3.5 px-4 whitespace-nowrap">
+                        <span className="inline-flex items-center gap-1.5 text-xs text-muted/90 font-mono bg-canvas/80 px-2.5 py-1 rounded-lg border border-line/50 group-hover:border-green/30 group-hover:bg-green-soft/30 group-hover:text-ink transition-all">
+                          <Mail className="h-3 w-3 text-muted/60 shrink-0 group-hover:text-green" />
+                          <span>{lead.email}</span>
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                        <a
+                          href={linkedinUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-[#0a66c2]/25 bg-[#0a66c2]/5 px-2.5 py-1 text-[11px] font-semibold text-[#0a66c2] hover:border-[#0a66c2]/50 hover:bg-[#0a66c2]/10 transition-colors shadow-2xs"
+                          title={`View ${lead.name} on LinkedIn`}
+                        >
+                          <svg className="h-3.5 w-3.5 fill-[#0a66c2] shrink-0" viewBox="0 0 24 24">
+                            <path d="M19 3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14m-.5 15.5v-5.3a3.26 3.26 0 0 0-3.26-3.26c-.85 0-1.84.52-2.28 1.3v-1.11h-2.79v8.37h2.79v-4.93c0-.77.62-1.4 1.39-1.4a1.4 1.4 0 0 1 1.4 1.4v4.93h2.75M6.46 10.9v8.37H9.25V10.9H6.46M7.86 6.54a1.64 1.64 0 1 0 0 3.27 1.64 1.64 0 0 0 0-3.27Z" />
+                          </svg>
+                          <span>LinkedIn</span>
+                          <ExternalLink className="h-2.5 w-2.5 opacity-60 text-muted" />
+                        </a>
+                      </td>
+                      <td className="py-3.5 px-4 whitespace-nowrap">
+                        <span className="inline-flex items-center gap-1.5 text-xs text-muted font-medium bg-white border border-line/80 px-2.5 py-1 rounded-full shadow-2xs">
+                          <span className="h-1.5 w-1.5 rounded-full bg-green/70 shrink-0" />
+                          <span>{lead.industry}</span>
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 whitespace-nowrap">
+                        <div className="inline-flex items-center gap-1.5 text-xs text-muted">
+                          <MapPin className="h-3.5 w-3.5 text-gold shrink-0" />
                           <span>{lead.location}</span>
                         </div>
-                      </td>
-                      <td className="p-4">
-                        <span className="rounded-full border border-line bg-white px-2.5 py-1 text-[11px] text-muted">
-                          {lead.industry}
-                        </span>
-                      </td>
-                      <td className="p-4">
-                        {lead.verificationTag === "Email verified" ? (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-green-soft px-3 py-1 text-[11px] font-bold text-green">
-                            <Check className="h-3 w-3" /> Email verified
-                          </span>
-                        ) : lead.verificationTag === "Enriched" ? (
-                          <span className="rounded-full bg-green-soft px-3 py-1 text-[11px] font-bold text-green">
-                            Enriched
-                          </span>
-                        ) : (
-                          <span className="rounded-full bg-gold-soft px-3 py-1 text-[11px] font-bold text-gold">
-                            Review contact
-                          </span>
-                        )}
-                      </td>
-                      <td className="p-4 text-right">
-                        <span className="rounded-full bg-green-soft px-2.5 py-1 text-xs font-bold text-green">
-                          {lead.matchScore}%
-                        </span>
-                      </td>
-                      <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          type="button"
-                          onClick={() => setActiveDrawerLead(lead)}
-                          className="rounded-xl border border-line p-1.5 text-muted hover:bg-mist hover:text-green cursor-pointer"
-                          title="Inspect lead details"
-                        >
-                          <ChevronRight className="h-4 w-4" />
-                        </button>
                       </td>
                     </tr>
                   );
@@ -1234,6 +1305,110 @@ export default function LeadManagementView({
               Back to selection
             </button>
           </aside>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* CLEAN LEAD & COMPANY DETAILS HOVER POPOVER                */}
+      {/* ========================================================= */}
+      {hoveredLead && popoverPos && (
+        <div
+          className="fixed z-50 pointer-events-none transition-all duration-150 ease-out animate-in fade-in zoom-in-95"
+          style={{
+            top: `${popoverPos.top}px`,
+            left: `${popoverPos.left}px`,
+            width: "420px",
+            maxWidth: "calc(100vw - 32px)",
+          }}
+        >
+          <div className="rounded-3xl border border-line/90 bg-white/98 shadow-[0_20px_60px_rgba(0,43,39,0.18)] backdrop-blur-xl p-5 text-ink text-xs space-y-3.5 ring-1 ring-black/5">
+            {/* Dark Green Brand Header - Lead & Company Identity */}
+            <div className="rounded-2xl bg-gradient-to-r from-green-dark via-green to-green-dark p-4 text-white shadow-sm flex items-center gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/15 border border-white/25 font-serif font-bold text-base text-white shadow-inner">
+                {getInitials(hoveredLead.name)}
+              </div>
+              <div className="min-w-0">
+                <h3 className="font-serif text-lg font-bold text-white tracking-tight truncate">
+                  {hoveredLead.name}
+                </h3>
+                <p className="text-xs text-sage font-medium truncate mt-0.5">
+                  {hoveredLead.jobTitle} · {hoveredLead.company}
+                </p>
+              </div>
+            </div>
+
+            {/* Lead & Company Attributes Grid */}
+            <div className="grid grid-cols-2 gap-2 text-[11px]">
+              {/* Email Address */}
+              <div className="col-span-2 rounded-xl bg-canvas p-2.5 border border-line/80">
+                <div className="text-[10px] font-bold text-muted uppercase flex items-center gap-1">
+                  <Mail className="h-3 w-3 text-muted" /> Email Address
+                </div>
+                <div className="font-mono text-xs text-ink font-semibold mt-1 truncate">
+                  {hoveredLead.email}
+                </div>
+              </div>
+
+              {/* Role Level */}
+              <div className="rounded-xl bg-canvas p-2.5 border border-line/80">
+                <div className="text-[10px] font-bold text-muted uppercase flex items-center gap-1">
+                  <Award className="h-3 w-3 text-green" /> Seniority Level
+                </div>
+                <div className="font-semibold text-ink mt-1 truncate">
+                  {hoveredLead.role || "Executive"}
+                </div>
+              </div>
+
+              {/* Function */}
+              <div className="rounded-xl bg-canvas p-2.5 border border-line/80">
+                <div className="text-[10px] font-bold text-muted uppercase flex items-center gap-1">
+                  <Layers className="h-3 w-3 text-green" /> Function
+                </div>
+                <div className="font-semibold text-ink mt-1 truncate">
+                  {getLeadFunction(hoveredLead)}
+                </div>
+              </div>
+
+              {/* Company & Domain */}
+              <div className="rounded-xl bg-canvas p-2.5 border border-line/80">
+                <div className="text-[10px] font-bold text-muted uppercase flex items-center gap-1">
+                  <Building2 className="h-3 w-3 text-green" /> Company & Size
+                </div>
+                <div className="font-semibold text-ink mt-1 truncate">
+                  {hoveredLead.company}
+                </div>
+                <div className="text-[10px] text-muted mt-0.5 truncate flex items-center gap-1">
+                  <Globe className="h-2.5 w-2.5 text-muted/70" />
+                  <span>{hoveredLead.companySize} employees · {leadDomain(hoveredLead) || "Website"}</span>
+                </div>
+              </div>
+
+              {/* Industry */}
+              <div className="rounded-xl bg-canvas p-2.5 border border-line/80">
+                <div className="text-[10px] font-bold text-muted uppercase flex items-center gap-1">
+                  <Users className="h-3 w-3 text-green" /> Industry
+                </div>
+                <div className="font-semibold text-ink mt-1 truncate">
+                  {hoveredLead.industry}
+                </div>
+              </div>
+
+              {/* HQ & Location */}
+              <div className="col-span-2 rounded-xl bg-canvas p-2.5 border border-line/80">
+                <div className="text-[10px] font-bold text-muted uppercase flex items-center gap-1">
+                  <MapPin className="h-3 w-3 text-green" /> Headquarters & Location
+                </div>
+                <div className="flex items-center justify-between gap-2 mt-1">
+                  <span className="font-semibold text-ink truncate">
+                    {hoveredLead.location}
+                  </span>
+                  <span className="text-[10px] text-muted shrink-0">
+                    HQ: {getLeadHeadquarters(hoveredLead)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

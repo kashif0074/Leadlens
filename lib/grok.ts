@@ -1,3 +1,4 @@
+import "server-only";
 import type { Lead } from "../types";
 
 export type GeneratedEmail = {
@@ -293,7 +294,7 @@ export async function generateCampaignEmails(
       {
         role: "system",
         content:
-          'Return only valid JSON: {"emails":[{"subject":"...","body":"..."},{"subject":"...","body":"..."},{"subject":"...","body":"..."}]}. Write exactly 3 concise B2B emails: Step 1 (Initial Email), Step 2 (Follow-up 1), Step 3 (Follow-up 2). Each body must be 45 words or fewer. No markdown or explanation.',
+          'Return only valid JSON: {"emails":[{"subject":"...","body":"..."},{"subject":"...","body":"..."},{"subject":"...","body":"..."}]}. Write exactly 3 concise, natural B2B emails: an initial note and two distinct follow-ups. Use only these recipient placeholders where relevant: {{first_name}}, {{company}}, {{job_title}}, {{industry}}, {{location}}. Do not put the example recipient\'s literal details into the reusable copy. Keep each body under 65 words, specific to the campaign brief, professional, conversational, and easy to answer. Do not invent research, prior contact, metrics, customer results, urgency, or offers not present in the brief. Do not use links, tracking language, all-caps emphasis, or deceptive subject lines. Follow-ups must not claim that an earlier message was sent. No markdown or explanation.',
       },
       {
         role: "user",

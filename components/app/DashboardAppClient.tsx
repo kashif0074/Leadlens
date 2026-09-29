@@ -8,7 +8,6 @@ import PromptOverlay from "../onboarding/PromptOverlay";
 import AppShell from "../layout/AppShell";
 import type { CampaignLaunchContext } from "../modules/CampaignsModule";
 import type { LeadGenerationContext } from "../modules/LeadGenerationModule";
-import { generatedLeadPool } from "../../lib/leads";
 
 const moduleLoading = () => (
   <div className="flex min-h-48 items-center justify-center text-sm text-muted" role="status">
@@ -19,10 +18,10 @@ const moduleLoading = () => (
 const DashboardModule = dynamic(() => import("../modules/DashboardModule"), { loading: moduleLoading });
 const CampaignsModule = dynamic(() => import("../modules/CampaignsModule"), { loading: moduleLoading });
 const LeadsModule = dynamic(() => import("../modules/LeadsModule"), { loading: moduleLoading });
-const InboxModule = dynamic(() => import("../modules/InboxModule"), { loading: moduleLoading });
-const MeetingsModule = dynamic(() => import("../modules/MeetingsModule"), { loading: moduleLoading });
 const AnalyticsModule = dynamic(() => import("../modules/AnalyticsModule"), { loading: moduleLoading });
 const SettingsModule = dynamic(() => import("../modules/SettingsModule"), { loading: moduleLoading });
+const InboxModule = dynamic(() => import("../modules/InboxModule"), { loading: moduleLoading });
+const MeetingsModule = dynamic(() => import("../modules/MeetingsModule"), { loading: moduleLoading });
 const LeadGenerationModule = dynamic(() => import("../modules/LeadGenerationModule"), { loading: moduleLoading });
 const EmailSequenceModule = dynamic(() => import("../modules/EmailSequenceModule"), { loading: moduleLoading });
 
@@ -41,8 +40,8 @@ export default function DashboardAppClient() {
   const [campaignLaunchContext, setCampaignLaunchContext] = useState<CampaignLaunchContext | null>(null);
   const [standaloneCampaignEntry, setStandaloneCampaignEntry] = useState(false);
   const [leadGenerationPrompt, setLeadGenerationPrompt] = useState("");
-  const [generatedLeads, setGeneratedLeads] = useState<Lead[]>(() => generatedLeadPool);
   const [sequenceLeads, setSequenceLeads] = useState<Lead[]>([]);
+  const [generatedLeads, setGeneratedLeads] = useState<Lead[]>([]);
   const [loadingWorkspace, setLoadingWorkspace] = useState(true);
   const [onboardingGenerating, setOnboardingGenerating] = useState(false);
   const [onboardingError, setOnboardingError] = useState("");
@@ -197,27 +196,20 @@ export default function DashboardAppClient() {
 
   const handleCampaignLaunched = async (payload: {
     selectedLeadIds: string[];
+    selectedLeads: Lead[];
     connectedEmail: string;
     provider: string;
-  }) => {
-    if (activeCampaignId) {
-      const response = await fetch("/api/campaigns/generate", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          campaignId: activeCampaignId,
-          sequence: campaigns.find((c) => c.id === activeCampaignId)?.sequence,
-          selectedLeadIds: payload.selectedLeadIds,
-          connectedEmail: payload.connectedEmail,
-          provider: payload.provider,
-          status: "Live",
-        }),
-      });
+  }): Promise<{ sentCount: number; failedCount: number; total: number; status: Campaign["status"] }> => {
+    if (!activeCampaignId) throw new Error("Save the campaign before launching it.");
+    const response = await fetch("/api/campaigns/launch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: activeCampaignId, ...payload }),
+    });
+    const result = (await response.json()) as { status?: Campaign["status"]; sentCount?: number; failedCount?: number; total?: number; error?: string };
+    if (!response.ok) throw new Error(result.error ?? "Unable to send campaign emails.");
 
-      if (!response.ok) throw new Error("Unable to save campaign launch settings.");
-    }
-
-    const selectedLeads = generatedLeads.filter((lead) => payload.selectedLeadIds.includes(lead.id));
+    const selectedLeads = payload.selectedLeads;
 
     setCampaignLaunchContext((current) => ({
       prompt: current?.prompt ?? leadGenerationPrompt,
@@ -233,9 +225,10 @@ export default function DashboardAppClient() {
         campaign.id === activeCampaignId
           ? {
               ...campaign,
-              status: "Live",
+              status: result.status ?? "Failed",
               leadsCount: payload.selectedLeadIds.length,
-              sentCount: 0,
+              sentCount: result.sentCount ?? 0,
+              failedCount: result.failedCount ?? 0,
               replyRate: 0,
             }
           : campaign,
@@ -243,7 +236,12 @@ export default function DashboardAppClient() {
     );
 
     setStandaloneCampaignEntry(false);
-    setCurrentModule("dashboard");
+    return {
+      sentCount: result.sentCount ?? 0,
+      failedCount: result.failedCount ?? 0,
+      total: result.total ?? payload.selectedLeadIds.length,
+      status: result.status ?? "Failed",
+    };
   };
 
   const handleSelectCampaign = (campaignId: string) => {
@@ -268,6 +266,159 @@ export default function DashboardAppClient() {
   const handleSendMail = (selectedLeads: Lead[]) => {
     setSequenceLeads(selectedLeads);
     setCurrentModule("email-sequence");
+  };
+
+  const handleImportCsvLeads = async (importedLeads: Lead[]) => {
+    if (!importedLeads.length) return;
+
+    setGeneratedLeads(importedLeads);
+    setSequenceLeads(importedLeads);
+
+    const firstCompany = importedLeads[0]?.company || "Target Accounts";
+    const leadCount = importedLeads.length;
+    const campaignName = `CSV Outreach - ${firstCompany} (${leadCount} lead${leadCount === 1 ? "" : "s"})`;
+    const uniqueCompanies = Array.from(new Set(importedLeads.map((l) => l.company))).filter(Boolean);
+    const companySummary = uniqueCompanies.slice(0, 3).join(", ") + (uniqueCompanies.length > 3 ? " and more" : "");
+    const prompt = `Outreach campaign for ${leadCount} imported prospects across ${companySummary}.`;
+
+    const defaultSequence: Campaign["sequence"] = [
+      {
+        step: 1,
+        delayDays: 0,
+        subject: "A question about {{company}}",
+        body: `Hi {{first_name}},\n\nI'm reaching out about ${prompt} given your {{job_title}} role at {{company}}. Would a brief conversation be useful?\n\nRegards,`,
+        manuallyEdited: false,
+      },
+      {
+        step: 2,
+        delayDays: 3,
+        subject: "One more thought for {{company}}",
+        body: `Hi {{first_name}},\n\nOne more note about ${prompt}. If this is relevant to your work at {{company}}, would you be open to a short conversation?\n\nRegards,`,
+        manuallyEdited: false,
+      },
+      {
+        step: 3,
+        delayDays: 5,
+        subject: "Should I close the loop, {{first_name}}?",
+        body: `Hi {{first_name}},\n\nIs ${prompt} a priority for your team at {{company}}? If not, no problem; I won't follow up again.\n\nRegards,`,
+        manuallyEdited: false,
+      },
+    ];
+
+    const personalizedEmails: Campaign["personalizedEmails"] = {};
+    for (const lead of importedLeads) {
+      const firstName = lead.firstName || lead.name.trim().split(/\s+/)[0] || lead.name;
+      personalizedEmails[lead.id] = defaultSequence.map((seq) => ({
+        step: seq.step,
+        delayDays: seq.delayDays,
+        subject: seq.subject
+          .replace(/\{\{\s*first_?name\s*\}\}/gi, firstName)
+          .replace(/\{\{\s*company\s*\}\}/gi, lead.company || "your team")
+          .replace(/\{\{\s*role\s*\}\}/gi, lead.jobTitle || lead.role || "team")
+          .replace(/\{\{\s*location\s*\}\}/gi, lead.location || "your region"),
+        body: seq.body
+          .replace(/\{\{\s*first_?name\s*\}\}/gi, firstName)
+          .replace(/\{\{\s*company\s*\}\}/gi, lead.company || "your company")
+          .replace(/\{\{\s*role\s*\}\}/gi, lead.jobTitle || lead.role || "Executive")
+          .replace(/\{\{\s*industry\s*\}\}/gi, lead.industry || "your industry")
+          .replace(/\{\{\s*location\s*\}\}/gi, lead.location || "your region"),
+        manuallyEdited: false,
+      }));
+    }
+
+    const selectedLeadIds = importedLeads.map((l) => l.id);
+
+    try {
+      const response = await fetch("/api/campaigns/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: campaignName,
+          prompt,
+          selectedLeadIds,
+          selectedLeads: importedLeads,
+          currentSequence: defaultSequence,
+        }),
+      });
+
+      const result = (await response.json()) as {
+        campaign?: Campaign & { prompt: string; selectedLeads?: Lead[] };
+        error?: string;
+      };
+      const savedCampaign: Campaign = result.campaign
+        ? {
+            id: result.campaign.id,
+            name: result.campaign.name,
+            brief: result.campaign.prompt || prompt,
+            status: "Ready",
+            leadsCount: leadCount,
+            sentCount: 0,
+            replyRate: 0,
+            sequence: result.campaign.sequence?.length ? result.campaign.sequence : defaultSequence,
+            personalizedEmails: result.campaign.personalizedEmails || personalizedEmails,
+            selectedLeadIds,
+            selectedLeads: importedLeads,
+          }
+        : {
+            id: `campaign-csv-${Date.now()}`,
+            name: campaignName,
+            brief: prompt,
+            status: "Ready",
+            leadsCount: leadCount,
+            sentCount: 0,
+            replyRate: 0,
+            sequence: defaultSequence,
+            personalizedEmails,
+            selectedLeadIds,
+            selectedLeads: importedLeads,
+          };
+
+      const context: CampaignLaunchContext = {
+        prompt,
+        selectedLeadIds,
+        selectedLeads: importedLeads,
+        connectedEmail: campaignLaunchContext?.connectedEmail ?? "",
+        provider: campaignLaunchContext?.provider ?? "",
+        allLeads: importedLeads,
+      };
+
+      window.localStorage.setItem("leadlens-workspace-context", JSON.stringify(context));
+      setCampaignLaunchContext(context);
+      setCampaigns((current) => [savedCampaign, ...current.filter((c) => c.id !== savedCampaign.id)]);
+      setActiveCampaignId(savedCampaign.id);
+      setStandaloneCampaignEntry(false);
+      setCurrentModule("campaign");
+    } catch (err) {
+      console.error("[Dashboard] Failed to create campaign on server for CSV leads:", err);
+      const fallbackCampaign: Campaign = {
+        id: `campaign-csv-${Date.now()}`,
+        name: campaignName,
+        brief: prompt,
+        status: "Ready",
+        leadsCount: leadCount,
+        sentCount: 0,
+        replyRate: 0,
+        sequence: defaultSequence,
+        personalizedEmails,
+        selectedLeadIds,
+        selectedLeads: importedLeads,
+      };
+
+      const context: CampaignLaunchContext = {
+        prompt,
+        selectedLeadIds,
+        selectedLeads: importedLeads,
+        connectedEmail: campaignLaunchContext?.connectedEmail ?? "",
+        provider: campaignLaunchContext?.provider ?? "",
+        allLeads: importedLeads,
+      };
+
+      setCampaignLaunchContext(context);
+      setCampaigns((current) => [fallbackCampaign, ...current.filter((c) => c.id !== fallbackCampaign.id)]);
+      setActiveCampaignId(fallbackCampaign.id);
+      setStandaloneCampaignEntry(false);
+      setCurrentModule("campaign");
+    }
   };
 
   const handleAddToConnect = () => {
@@ -352,6 +503,35 @@ export default function DashboardAppClient() {
               onOpenNewCampaign={() => setIsPromptOverlayOpen(true)}
               onAddToConnect={handleAddToConnect}
               onLaunch={handleCampaignLaunched}
+              onNavigate={(mod) => setCurrentModule(mod === "campaigns" ? "campaign" : mod)}
+              onSelectCampaign={handleSelectCampaign}
+              onImportCsvLeads={handleImportCsvLeads}
+            />
+          )}
+
+          {currentModule === "analytics" && (
+            <AnalyticsModule
+              campaigns={campaigns}
+              leads={generatedLeads}
+              selectedCount={campaignLaunchContext?.selectedLeadIds.length ?? 0}
+            />
+          )}
+          {currentModule === "inbox" && (
+            <InboxModule
+              launched={liveCampaigns.length > 0}
+              onNavigate={(mod) => setCurrentModule(mod === "campaigns" ? "campaign" : (mod as any))}
+              connectedEmail={campaignLaunchContext?.connectedEmail}
+            />
+          )}
+          {currentModule === "meetings" && <MeetingsModule launched={liveCampaigns.length > 0} />}
+          {currentModule === "settings" && <SettingsModule connectedEmail={campaignLaunchContext?.connectedEmail} />}
+
+          {currentModule === "leads" && (
+            <LeadsModule
+              leads={generatedLeads}
+              connectedEmail={campaignLaunchContext?.connectedEmail}
+              initialSelectedIds={campaignLaunchContext?.selectedLeadIds}
+              onSendMail={handleSendMail}
             />
           )}
 
@@ -365,28 +545,6 @@ export default function DashboardAppClient() {
                 setStandaloneCampaignEntry(false);
                 setCurrentModule("campaign");
               }}
-            />
-          )}
-
-          {currentModule === "inbox" && <InboxModule launched={liveCampaigns.length > 0} />}
-          {currentModule === "meetings" && <MeetingsModule launched={liveCampaigns.length > 0} />}
-          {currentModule === "analytics" && (
-            <AnalyticsModule
-              campaigns={campaigns}
-              leads={generatedLeads}
-              selectedCount={campaignLaunchContext?.selectedLeadIds.length ?? 0}
-            />
-          )}
-          {currentModule === "settings" && (
-            <SettingsModule connectedEmail={campaignLaunchContext?.connectedEmail} />
-          )}
-
-          {currentModule === "leads" && (
-            <LeadsModule
-              leads={generatedLeads}
-              connectedEmail={campaignLaunchContext?.connectedEmail}
-              initialSelectedIds={campaignLaunchContext?.selectedLeadIds}
-              onSendMail={handleSendMail}
             />
           )}
         </AppShell>
@@ -412,6 +570,9 @@ export default function DashboardAppClient() {
             onOpenNewCampaign={() => setIsPromptOverlayOpen(true)}
             onAddToConnect={handleAddToConnect}
             onLaunch={handleCampaignLaunched}
+            onNavigate={(mod) => setCurrentModule(mod === "campaigns" ? "campaign" : mod)}
+            onSelectCampaign={handleSelectCampaign}
+            onImportCsvLeads={handleImportCsvLeads}
           />
         </AppShell>
       )}

@@ -19,6 +19,8 @@ model User {
   campaigns     Campaign[]
   leads         Lead[]
   sessions      Session[]
+  emailAccounts EmailAccount[]
+  emailSuppressions EmailSuppression[]
 
   @@map("users")
 }
@@ -99,14 +101,39 @@ model Campaign {
   personalizedEmails Json?
   connectedEmail     String?
   provider           String?
+  sentCount          Int      @default(0) @map("sent_count")
+  failedCount        Int      @default(0) @map("failed_count")
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
   userId             String?  @map("user_id")
   user               User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   leads              Lead[]
+  emailDeliveries    EmailDelivery[]
 
   @@index([userId])
   @@map("campaigns")
+}
+
+model EmailDelivery {
+  id         String   @id @default(cuid())
+  campaignId String   @map("campaign_id")
+  leadId     String   @map("lead_id")
+  step       Int
+  recipient  String
+  senderEmail String? @map("sender_email")
+  subject    String   @db.Text
+  body       String   @db.Text
+  status     String   @default("Sending")
+  messageId  String?  @map("message_id")
+  error      String?  @db.Text
+  sentAt     DateTime? @map("sent_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, leadId, step])
+  @@index([campaignId, status])
+  @@map("email_deliveries")
 }
 
 model Lead {
@@ -194,4 +221,29 @@ model JobResult {
   createdAt  DateTime @default(now()) @map("created_at")
 
   @@map("job_results")
+}
+model EmailAccount {
+  id          String   @id @default(cuid())
+  userId      String
+  email       String
+  displayName String   @default("") @map("display_name")
+  sendLockUntil DateTime? @map("send_lock_until")
+  appPassword String   @db.Text
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, email])
+}
+
+model EmailSuppression {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  email     String   @db.VarChar(191)
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, email])
+  @@index([email])
+  @@map("email_suppressions")
 }

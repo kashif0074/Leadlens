@@ -1,3 +1,5 @@
+import "server-only";
+
 const ZEROBOUNCE_BASE_URL = "https://api.zerobounce.net/v2";
 
 export type ZeroBounceStatus =
@@ -17,9 +19,14 @@ export type ZeroBounceResult = {
 };
 
 export async function verifyEmail(email: string): Promise<ZeroBounceResult> {
+  const apiKey = process.env.ZEROBOUNCE_API_KEY?.trim();
+  if (!apiKey) {
+    return { status: "unknown", subStatus: null, isDeliverable: false };
+  }
+
   try {
     const params = new URLSearchParams({
-      api_key: process.env.ZEROBOUNCE_API_KEY || "",
+      api_key: apiKey,
       email,
     });
 

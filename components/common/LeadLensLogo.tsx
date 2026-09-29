@@ -10,7 +10,7 @@ export default function LeadLensLogo({ className = "", variant = "nav" }: LogoPr
   if (variant === "sm") {
     boxClass = "h-8 w-8";
   } else if (variant === "landing") {
-    boxClass = "h-12 w-[144px] sm:h-14 sm:w-[168px]";
+    boxClass = "h-14 w-[168px] sm:h-16 sm:w-[196px] md:h-[80px] md:w-[210px]";
   }
 
   return (

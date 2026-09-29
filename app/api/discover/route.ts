@@ -23,9 +23,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Identify user if signed in
     const session = await getServerSession(authOptions);
-    const effectiveUserId = session?.user?.id || body.userId || null;
+    const effectiveUserId = session?.user?.id ?? null;
 
     const maxLeads = typeof body.limit === "number" && body.limit > 0 ? Math.min(body.limit, 20) : 8;
 
@@ -36,8 +35,8 @@ export async function POST(req: NextRequest) {
     console.error("[API /api/discover] Error executing lead discovery pipeline:", error);
     const message = error instanceof Error ? error.message : "Lead discovery pipeline encountered an error.";
     const status =
-      typeof error === "object" && error && "status" in error && typeof (error as any).status === "number"
-        ? (error as any).status
+      typeof error === "object" && error && "status" in error && typeof (error as { status?: unknown }).status === "number"
+        ? (error as { status: number }).status
         : 500;
     return NextResponse.json({ error: message }, { status });
   }

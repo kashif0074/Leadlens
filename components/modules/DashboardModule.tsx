@@ -23,8 +23,8 @@ export default function DashboardModule({
   onSelectCampaign,
 }: DashboardModuleProps) {
   const activeCampaign = campaigns.find((campaign) => campaign.id === activeCampaignId) ?? campaigns[0];
-  const liveCampaigns = campaigns.filter((campaign) => campaign.status === "Live");
-  const activeCampaignIsLive = activeCampaign?.status === "Live";
+  const liveCampaigns = campaigns.filter((campaign) => campaign.status === "Live" || campaign.status === "Partially sent");
+  const activeCampaignIsLive = activeCampaign?.status === "Live" || activeCampaign?.status === "Partially sent";
   const selectedCount = selectedLeads.length;
   const workflowPercent = activeCampaignIsLive ? 100 : selectedCount > 0 && connectedEmail ? 75 : selectedCount > 0 ? 45 : campaigns.length ? 20 : 0;
 
@@ -46,7 +46,18 @@ export default function DashboardModule({
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard label="Live campaigns" value={String(liveCampaigns.length)} detail={`${campaigns.length} total in workspace`} icon={Rocket} />
         <MetricCard label="Selected leads" value={String(selectedCount)} detail={selectedCount ? "Included in the active campaign" : "No leads selected yet"} icon={Users} />
-        <MetricCard label="Emails sent" value={String(activeCampaign?.sentCount ?? 0)} detail={activeCampaignIsLive ? "Tracked after sends begin" : "No sends yet"} icon={Mail} />
+        <MetricCard
+          label="Emails sent"
+          value={String(activeCampaign?.sentCount ?? 0)}
+          detail={
+            activeCampaign?.failedCount
+              ? `${activeCampaign.failedCount} failed sends`
+              : activeCampaignIsLive
+                ? "Accepted by Gmail SMTP"
+                : "No sends yet"
+          }
+          icon={Mail}
+        />
         <MetricCard label="Meetings booked" value="0" detail="Meetings appear after confirmed replies" icon={CalendarCheck} />
       </section>
 
@@ -58,8 +69,26 @@ export default function DashboardModule({
               <h2 className="mt-1 text-lg font-bold">{activeCampaign?.name ?? "No campaign started"}</h2>
             </div>
             <span className="flex items-center gap-1.5 text-xs font-semibold text-green-soft">
-              <span className={`h-2 w-2 rounded-full ${activeCampaignIsLive ? "bg-green-300" : "bg-gold"}`} />
-              {activeCampaignIsLive ? "Live" : activeCampaign ? "In setup" : "Idle"}
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  activeCampaign?.status === "Live"
+                    ? "bg-green-300"
+                    : activeCampaign?.status === "Partially sent"
+                      ? "bg-emerald-300 animate-pulse"
+                      : activeCampaign?.status === "Failed"
+                        ? "bg-red-400"
+                        : "bg-gold"
+                }`}
+              />
+              {activeCampaign?.status === "Live"
+                ? "Live"
+                : activeCampaign?.status === "Partially sent"
+                  ? "Partially sent"
+                  : activeCampaign?.status === "Failed"
+                    ? "Failed"
+                    : activeCampaign
+                      ? "In setup"
+                      : "Idle"}
             </span>
           </div>
           <div className="space-y-6 p-6 sm:p-8">
@@ -78,7 +107,11 @@ export default function DashboardModule({
                     <div className="h-full rounded-full bg-green" style={{ width: `${workflowPercent}%` }} />
                   </div>
                   <div className="mt-2 flex justify-between gap-3 text-xs text-muted">
-                    <span>{activeCampaignIsLive ? "Campaign is live in this workspace" : "Continue setup to launch"}</span>
+                    <span>
+                      {activeCampaignIsLive
+                        ? `Campaign active · ${activeCampaign.sentCount} sent${activeCampaign.failedCount ? ` · ${activeCampaign.failedCount} failed` : ""}`
+                        : "Continue setup to launch"}
+                    </span>
                     <span>
                       {selectedCount} selected · {activeCampaign.leadsCount} campaign leads
                     </span>
@@ -133,6 +166,7 @@ export default function DashboardModule({
               Open inbox <ArrowRight className="h-4 w-4" />
             </button>
           </section>
+
         </div>
       </section>
 
@@ -164,13 +198,23 @@ export default function DashboardModule({
               >
                 <div className="flex items-center justify-between gap-3">
                   <span className="font-bold text-ink">{campaign.name}</span>
-                  <span className={`status ${campaign.status === "Live" ? "good" : "warn"}`}>{campaign.status}</span>
+                  <span
+                    className={`status ${
+                      campaign.status === "Live" || campaign.status === "Partially sent"
+                        ? "good"
+                        : campaign.status === "Failed"
+                          ? "bad"
+                          : "warn"
+                    }`}
+                  >
+                    {campaign.status}
+                  </span>
                 </div>
                 <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-muted">{campaign.brief}</p>
                 <div className="mt-4 flex items-center justify-between text-xs text-muted">
                   <span>{campaign.leadsCount} leads</span>
                   <span>
-                    {campaign.sentCount} sent · {campaign.replyRate}% replies
+                    {campaign.sentCount} sent{campaign.failedCount ? ` · ${campaign.failedCount} failed` : ""} · {campaign.replyRate}% replies
                   </span>
                 </div>
               </button>

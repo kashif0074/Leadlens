@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/auth";
 import { db } from "@/lib/db";
 import { generateCampaignEmails } from "@/lib/grok";
+import { personalizeText } from "@/lib/campaigns";
 import type { Campaign, Lead } from "@/types";
 
 export const runtime = "nodejs";
@@ -41,10 +42,13 @@ export async function POST(request: NextRequest) {
   }
 
   const prompt = body.prompt?.trim();
-  const selectedLeads = Array.isArray(body.selectedLeads) ? body.selectedLeads : [];
-  const selectedLeadIds = Array.isArray(body.selectedLeadIds)
+  const submittedLeads = Array.isArray(body.selectedLeads) ? body.selectedLeads : [];
+  const requestedLeadIds = Array.isArray(body.selectedLeadIds)
     ? body.selectedLeadIds
-    : selectedLeads.map((lead) => lead.id);
+    : submittedLeads.map((lead) => lead.id);
+  const leadById = new Map(submittedLeads.map((lead) => [lead.id, lead]));
+  const selectedLeads = requestedLeadIds.map((id) => leadById.get(id)).filter((lead): lead is Lead => Boolean(lead));
+  const selectedLeadIds = requestedLeadIds;
 
   if (!prompt || prompt.length < 10) {
     return NextResponse.json(
@@ -55,32 +59,67 @@ export async function POST(request: NextRequest) {
   if (!selectedLeads.length) {
     return NextResponse.json({ error: "Select at least one lead before generating emails." }, { status: 400 });
   }
+  if (new Set(selectedLeadIds).size !== selectedLeadIds.length || selectedLeads.length !== selectedLeadIds.length) {
+    return NextResponse.json({ error: "Selected lead IDs must be unique and match the submitted leads." }, { status: 400 });
+  }
 
   const abortController = new AbortController();
   const timeout = setTimeout(() => abortController.abort(), 50_000);
 
   try {
-    // Generate the campaign email sequence using Groq with the primary lead context
-    const primaryLead = selectedLeads[0];
-    const generated = await generateCampaignEmails(
-      prompt,
-      [primaryLead],
-      body.instruction,
-      abortController.signal,
-    );
-
     const current = body.currentSequence ?? [];
-    const sequence = generated.map((email, index) => {
-      const existing = current[index];
-      return existing?.manuallyEdited && !body.instruction?.toLowerCase().includes("replace manually")
-        ? existing
-        : { ...email, manuallyEdited: false };
-    });
+    let sequence: Campaign["sequence"] = [];
 
-    // Populate personalization mapping for all selected leads
-    const personalizedEmails: Record<string, typeof sequence> = {};
+    // If regeneration instruction provided or sequence is empty, attempt AI generation with fallback
+    if (body.instruction || !current.length) {
+      try {
+        const generated = await generateCampaignEmails(prompt, [selectedLeads[0]], body.instruction, abortController.signal);
+        sequence = generated.map((email, index) => {
+          const existing = current[index];
+          return existing?.manuallyEdited && !body.instruction?.toLowerCase().includes("replace manually")
+            ? existing
+            : { ...email, manuallyEdited: false };
+        });
+      } catch (aiError) {
+        console.warn("[API /api/campaigns/generate] AI generation error, using fallback sequence:", aiError);
+        sequence = current.length === 3 ? current : [
+          {
+            step: 1,
+            delayDays: 0,
+            subject: "A question about {{company}}",
+            body: `Hi {{first_name}},\n\nI'm reaching out about ${prompt} given your {{job_title}} role at {{company}}. Would a brief conversation be useful?\n\nRegards,`,
+            manuallyEdited: false,
+          },
+          {
+            step: 2,
+            delayDays: 3,
+            subject: "One more thought for {{company}}",
+            body: `Hi {{first_name}},\n\nOne more note about ${prompt}. If this is relevant to your work at {{company}}, would you be open to a short conversation?\n\nRegards,`,
+            manuallyEdited: false,
+          },
+          {
+            step: 3,
+            delayDays: 5,
+            subject: "Should I close the loop, {{first_name}}?",
+            body: `Hi {{first_name}},\n\nIs ${prompt} a priority for your team at {{company}}? If not, no problem; I won't follow up again.\n\nRegards,`,
+            manuallyEdited: false,
+          },
+        ];
+      }
+    } else {
+      sequence = current;
+    }
+
+    // Build personalized emails for each lead
+    const personalizedEmails: Record<string, { step: number; delayDays: number; subject: string; body: string; manuallyEdited?: boolean }[]> = {};
     for (const lead of selectedLeads) {
-      personalizedEmails[lead.id] = sequence;
+      personalizedEmails[lead.id] = sequence.map((email) => ({
+        step: email.step,
+        delayDays: email.delayDays,
+        subject: personalizeText(email.subject, lead),
+        body: personalizeText(email.body, lead),
+        manuallyEdited: email.manuallyEdited ?? false,
+      }));
     }
 
     const name = body.name?.trim() || prompt.replace(/\s+/g, " ").slice(0, 48) || "Outbound campaign";

@@ -60,7 +60,7 @@ export default function LeadsModule({ leads, connectedEmail, initialSelectedIds,
         onSelectAll={(ids = leads.map((lead) => lead.id)) => setSelectedIds(new Set(ids))}
         onClearAll={() => setSelectedIds(new Set())}
         onContinue={handleContinue}
-        continueLabel="Review email sequence"
+        continueLabel="Review campaign setup"
       />
     </div>
   );

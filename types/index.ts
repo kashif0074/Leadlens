@@ -1,6 +1,8 @@
 export type Lead = {
   id: string;
   name: string;
+  firstName?: string;
+  lastName?: string;
   jobTitle: string;
   role: 'Executive' | 'Director' | 'Manager' | 'Individual Contributor';
   function?: string;
@@ -18,6 +20,7 @@ export type Lead = {
   matchReason: string;
   matchScore: number;
   status?: 'Discovered' | 'Contacted' | 'Replied' | 'Meeting Booked';
+  linkedinUrl?: string;
 };
 
 export type Campaign = {
@@ -30,9 +33,10 @@ export type Campaign = {
   selectedLeads?: Lead[];
   connectedEmail?: string | null;
   provider?: string | null;
-  status: 'Draft saved' | 'Live' | 'Ready';
+  status: 'Draft saved' | 'Live' | 'Ready' | 'Partially sent' | 'Failed';
   leadsCount: number;
   sentCount: number;
+  failedCount?: number;
   replyRate: number;
   personalizedEmails?: Record<string, {
     step: number;
@@ -50,34 +54,6 @@ export type Campaign = {
   }[];
 };
 
-export type EmailThread = {
-  id: string;
-  leadName: string;
-  leadTitle: string;
-  company: string;
-  email: string;
-  subject: string;
-  category: 'Interested' | 'Needs Info' | 'Not Interested';
-  timestamp: string;
-  preview: string;
-  messages: {
-    sender: 'user' | 'lead';
-    senderName: string;
-    time: string;
-    content: string;
-  }[];
-};
-
-export type Meeting = {
-  id: string;
-  leadName: string;
-  company: string;
-  jobTitle: string;
-  date: string;
-  time: string;
-  status: 'Confirmed' | 'Pending';
-};
-
 export type AppModule =
   | "dashboard"
   | "campaign"
@@ -89,8 +65,6 @@ export type AppModule =
   | "meetings"
   | "analytics"
   | "settings";
-
-export type ViewMode = "landing" | "prompt" | "auth" | "app";
 
 export type SetupStep = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 

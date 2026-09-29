@@ -19,7 +19,6 @@ import {
   X,
   House,
   LogOut,
-  User,
 } from "lucide-react";
 
 interface AppShellProps {
@@ -53,9 +52,11 @@ function isItemActive(currentModule: AppModule, itemId: AppModule) {
 }
 
 function moduleTitle(currentModule: AppModule) {
-  if (currentModule === "email-sequence") return "Email sequence";
   if (currentModule === "campaign" || currentModule === "campaigns") return "Campaigns";
   if (currentModule === "lead-generation") return "Lead generation";
+  if (currentModule === "email-sequence") return "Email sequence";
+  if (currentModule === "inbox") return "Inbox";
+  if (currentModule === "meetings") return "Meetings";
   if (currentModule === "settings") return "Profile & Settings";
   return currentModule.replace("-", " ");
 }

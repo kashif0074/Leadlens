@@ -356,7 +356,7 @@ export default function LandingPage({ onStartCampaign, onEnterApp }: LandingPage
                 Automated Warmup & Reputation
               </h3>
               <p className="text-xs text-[#5A6672] mt-2 leading-relaxed">
-                Domain warmup shields, SPF/DKIM verification, and daily limit enforcement prevent your cold emails from ever hitting spam.
+                Campaign sends use conservative volume caps and one-click opt-outs. Configure SPF, DKIM, and DMARC with your sending-domain provider; inbox placement cannot be guaranteed.
               </p>
             </div>
 
