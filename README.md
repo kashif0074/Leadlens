@@ -21,10 +21,19 @@ the browser.
 
 ## Gmail sending accounts
 
-Each user connects their own Gmail account with a Google App Password. The
-account must have 2-Step Verification enabled; create the 16-character App
-Password at [Google Account App Passwords](https://myaccount.google.com/apppasswords).
-Do not use or store the account's regular Google password.
+Google sign-in is used only to authenticate a LeadLens user. To send a campaign,
+the user separately connects a Gmail account from the campaign's Connect inbox
+step using Google OAuth. Add this authorized redirect URI to the Google OAuth
+client used by the app:
+
+```text
+${NEXTAUTH_URL}/api/email-accounts/oauth/callback
+```
+
+The sender account is saved against the authenticated LeadLens user and linked
+to the campaign. Gmail OAuth access and refresh tokens are encrypted and remain
+server-side. Revoked or expired access requires the user to reconnect; sending
+never falls back to the Google sign-in address or a global SMTP mailbox.
 
 Set `ENCRYPTION_KEY` in `.env` to a randomly generated 32-byte hexadecimal key:
 
@@ -32,9 +41,10 @@ Set `ENCRYPTION_KEY` in `.env` to a randomly generated 32-byte hexadecimal key:
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-Keep this key private and backed up: saved Gmail credentials cannot be
-decrypted if the key is lost or rotated. Apply the `EmailAccount` migration
-before starting the app with `npx prisma migrate deploy`.
+Keep this key private and backed up: saved Gmail tokens cannot be decrypted if
+the key is lost or rotated. Apply all migrations before starting the app with
+`npx prisma migrate deploy`. Existing App Password-based accounts must reconnect
+through Google OAuth after the Gmail OAuth migration.
 
 ## Sending-domain authentication
 

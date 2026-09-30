@@ -29,9 +29,9 @@ export async function POST(request: NextRequest) {
 
     const account = await db.emailAccount.findFirst({
       where: { id: body.emailAccountId, userId: session.user.id, email },
-      select: { id: true, email: true },
+      select: { id: true, email: true, status: true },
     });
-    if (!account) {
+    if (!account || account.status !== "connected") {
       return NextResponse.json({ error: "Connect this Gmail account before adding it to the campaign." }, { status: 400 });
     }
 
@@ -39,10 +39,10 @@ export async function POST(request: NextRequest) {
 
     await db.campaign.update({
       where: { id: campaign.id },
-      data: { connectedEmail: account.email, provider: providerName },
+      data: { emailAccountId: account.id, connectedEmail: account.email, provider: providerName },
     });
 
-    return NextResponse.json({ connectedEmail: account.email, provider: providerName });
+    return NextResponse.json({ emailAccountId: account.id, connectedEmail: account.email, provider: providerName });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to verify the sending inbox.";
     console.error("[API /api/campaigns/connect] Unable to save Gmail account:", error);

@@ -90,7 +90,7 @@ export default function SettingsModule({ connectedEmail }: SettingsModuleProps) 
             </label>
             <label className="block text-sm font-bold">
               Saved sending email
-              <input className="input mt-2" value={connectedEmail ?? userEmail} readOnly placeholder="Save an inbox during campaign setup" />
+              <input className="input mt-2" value={connectedEmail ?? ""} readOnly placeholder="No campaign sender connected" />
             </label>
             <label className="block text-sm font-bold">
               Enforced sending cap

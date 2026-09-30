@@ -548,13 +548,13 @@ export async function extractSearchCriteria(
     model: GROQ_MODEL,
     temperature: 0.1,
     reasoning_effort: "low",
-    max_completion_tokens: 300,
+    max_completion_tokens: 1000,
     response_format: { type: "json_object" },
     messages: [
       {
         role: "system",
         content:
-          'Extract structured lead-search criteria from a B2B campaign brief. Return only valid JSON: {"industry":"...","city":"...","country":"...","keywords":["..."],"companySize":"..."}. "industry" and "city" are required and must be concrete (e.g. "dental clinics", "Dubai"), never vague. "keywords" are 2-4 short terms useful for a business search engine. If companySize is not mentioned, omit it.',
+          'You are a B2B lead search criteria extractor. Extract structured search criteria from any campaign brief into valid JSON: {"industry":"...","city":"...","country":"...","keywords":["..."],"companySize":"..."}. Rules: 1. ALWAYS return valid JSON strictly following the schema. NEVER return plain text, refusal, or markdown. 2. If industry is vague or missing, infer a standard concrete target industry (e.g. "software companies", "marketing agencies"). 3. If city is not explicitly mentioned, supply a major business center like "New York" or "London". 4. If country is omitted, infer it from the city (e.g. "US", "UK"). 5. "keywords" should be 2 to 4 relevant search terms for business discovery. 6. Omit companySize if not mentioned.',
       },
       { role: "user", content: prompt },
     ],
@@ -615,7 +615,11 @@ export async function extractSearchCriteria(
       }
 
       if (!isLastKey && nextKeyConfig) continue;
-      throw groqError(`AI criteria extraction error: ${rawErrorMsg}`, response.status);
+      let userFacingMessage = rawErrorMsg;
+      if (rawErrorMsg.includes("Failed to generate JSON") || rawErrorMsg.includes("failed_generation")) {
+        userFacingMessage = "Please describe your campaign in more detail (e.g. 'Software companies in New York').";
+      }
+      throw groqError(`AI criteria extraction error: ${userFacingMessage}`, response.status);
     }
 
     const text = responseData.choices?.[0]?.message?.content;

@@ -2,47 +2,28 @@
 // Robust Nodemailer email-sending helper for Gmail and custom SMTP providers.
 import nodemailer from "nodemailer";
 
-function getSmtpConfig() {
-  const host = process.env.SMTP_HOST?.trim() || "smtp.gmail.com";
-  const port = Number(process.env.SMTP_PORT?.trim() ?? (host === "smtp.gmail.com" ? "587" : "587"));
-  const secure = process.env.SMTP_SECURE?.trim() === "true" || port === 465;
-  const user = process.env.SMTP_USER?.trim() || "";
-  // Google App Passwords often contain spaces when copied (e.g. 'xxxx xxxx xxxx xxxx')
-  const pass = process.env.SMTP_PASS?.replace(/\s+/g, "").trim() || "";
-
-  return { host, port, secure, user, pass };
-}
-
 export type SmtpCredentials = {
   email: string;
-  appPassword: string;
   displayName?: string;
+  accessToken: string;
+  clientId: string;
+  clientSecret: string;
+  refreshToken: string;
 };
 
-function createTransporter(credentials?: SmtpCredentials) {
-  if (credentials) {
-    return nodemailer.createTransport({
-      service: "gmail",
-      auth: { user: credentials.email, pass: credentials.appPassword },
-      pool: true,
-      maxConnections: 1,
-      connectionTimeout: 15000,
-      greetingTimeout: 15000,
-      socketTimeout: 20000,
-    });
-  }
-
-  const { host, port, secure, user, pass } = getSmtpConfig();
-
-  if (!user || !pass) {
-    throw new Error("SMTP credentials are not configured on the server. Please set SMTP_USER and SMTP_PASS in your .env file.");
-  }
-
+function createTransporter(credentials: SmtpCredentials) {
   return nodemailer.createTransport({
-    host,
-    port,
-    secure,
-    auth: { user, pass },
+    service: "gmail",
+    auth: {
+      type: "OAuth2",
+      user: credentials.email,
+      clientId: credentials.clientId,
+      clientSecret: credentials.clientSecret,
+      refreshToken: credentials.refreshToken,
+      accessToken: credentials.accessToken,
+    },
+    pool: true,
+    maxConnections: 1,
     connectionTimeout: 15000,
     greetingTimeout: 15000,
     socketTimeout: 20000,
@@ -51,21 +32,6 @@ function createTransporter(credentials?: SmtpCredentials) {
 
 export function createSenderTransport(credentials: SmtpCredentials) {
   return createTransporter(credentials);
-}
-
-// Lazy init transporter
-let transporter: ReturnType<typeof createTransporter> | null = null;
-
-function getTransporter(credentials?: SmtpCredentials) {
-  if (credentials) return createTransporter(credentials);
-  if (!transporter) {
-    transporter = createTransporter();
-  }
-  return transporter;
-}
-
-export function resetTransporter() {
-  transporter = null;
 }
 
 export function normalizeSmtpError(error: unknown): Error {
@@ -83,7 +49,7 @@ export function normalizeSmtpError(error: unknown): Error {
   const responseCode = Number(smtpError.responseCode || 0);
   const responseStr = typeof smtpError.response === "string" ? smtpError.response : "";
 
-  // Authentication error (Gmail App Password missing / invalid)
+  // Authentication error (Gmail OAuth grant invalid or revoked)
   if (
     responseCode === 535 ||
     codeStr === "EAUTH" ||
@@ -91,7 +57,7 @@ export function normalizeSmtpError(error: unknown): Error {
     /invalid login|authentication failed/i.test(responseStr)
   ) {
     return new Error(
-      "Gmail rejected these credentials. Check that 2-Step Verification is enabled and reconnect using a valid 16-character App Password, not your regular Google password.",
+      "Gmail rejected this authorization. Reconnect the sending Gmail account and approve the requested permissions.",
     );
   }
 
@@ -103,10 +69,7 @@ export function normalizeSmtpError(error: unknown): Error {
     codeStr === "ENOTFOUND" ||
     /timeout|connect econnrefused|getaddrinfo enotfound/i.test(messageStr)
   ) {
-    const { host, port } = getSmtpConfig();
-    return new Error(
-      `Failed to connect to SMTP server (${host}:${port}). Please verify your network connection and SMTP server host settings.`,
-    );
+    return new Error("Unable to connect to Gmail SMTP. Check the network connection and try again.");
   }
 
   // Rate limits
@@ -141,33 +104,28 @@ export type SendEmailInput = {
   body: string;
   fromName?: string;
   unsubscribeUrl?: string;
-  credentials?: SmtpCredentials;
+  credentials: SmtpCredentials;
   transport?: ReturnType<typeof createSenderTransport>;
 };
 
 export async function verifySenderAddress(
-  email?: string,
-  credentials?: SmtpCredentials,
+  email: string,
+  credentials: SmtpCredentials,
   transport?: ReturnType<typeof createSenderTransport>,
 ): Promise<string> {
-  const { user } = getSmtpConfig();
-  const sender = credentials?.email ?? user;
-  if (!sender) {
-    throw new Error("SMTP_USER is not configured in .env. Please configure your sending email credentials.");
-  }
+  const sender = credentials.email;
 
-  if (email && email.trim() && sender.toLowerCase() !== email.trim().toLowerCase()) {
+  if (sender.toLowerCase() !== email.trim().toLowerCase()) {
     throw new Error(`The provided email (${email.trim()}) does not match the authenticated sending account (${sender}).`);
   }
 
-  const activeTransporter = transport ?? getTransporter(credentials);
+  const activeTransporter = transport ?? createTransporter(credentials);
   try {
     await activeTransporter.verify();
   } catch (error) {
-    if (!credentials && !transport) resetTransporter();
     throw normalizeSmtpError(error);
   } finally {
-    if (credentials && !transport) activeTransporter.close();
+    if (!transport) activeTransporter.close();
   }
 
   return sender;
@@ -209,19 +167,15 @@ export async function sendEmail({
     throw new Error("Email body cannot be empty.");
   }
 
-  const { user } = getSmtpConfig();
-  const sender = credentials?.email ?? user;
-  if (!sender) {
-    throw new Error("SMTP_USER is not configured in .env.");
-  }
+  const sender = credentials.email;
 
-  const activeTransporter = transport ?? getTransporter(credentials);
+  const activeTransporter = transport ?? createTransporter(credentials);
   let info: Awaited<ReturnType<typeof activeTransporter.sendMail>>;
-  const displayName = sanitizeHeaderValue(fromName || credentials?.displayName || "");
+  const displayName = sanitizeHeaderValue(fromName || credentials.displayName || "");
   const cleanUnsubscribeUrl = unsubscribeUrl?.trim();
   if (cleanUnsubscribeUrl) {
     const parsedUrl = new URL(cleanUnsubscribeUrl);
-    if (parsedUrl.protocol !== "https:" && parsedUrl.hostname !== "localhost") {
+    if (parsedUrl.protocol !== "https:" && parsedUrl.hostname !== "localhost" && parsedUrl.hostname !== "127.0.0.1") {
       throw new Error("Unsubscribe links must use HTTPS.");
     }
   }
@@ -266,7 +220,7 @@ export async function sendEmail({
   } catch (error) {
     throw normalizeSmtpError(error);
   } finally {
-    if (credentials && !transport) activeTransporter.close();
+    if (!transport) activeTransporter.close();
   }
 
   if (!info.accepted || !info.accepted.length || (info.rejected && info.rejected.length > 0)) {

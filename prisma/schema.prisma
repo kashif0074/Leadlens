@@ -8,18 +8,18 @@ datasource db {
 }
 
 model User {
-  id            String     @id @default(cuid())
-  name          String?
-  email         String?    @unique
-  emailVerified DateTime?  @map("email_verified")
-  image         String?
-  createdAt     DateTime   @default(now()) @map("created_at")
-  updatedAt     DateTime   @updatedAt @map("updated_at")
-  accounts      Account[]
-  campaigns     Campaign[]
-  leads         Lead[]
-  sessions      Session[]
-  emailAccounts EmailAccount[]
+  id                String             @id @default(cuid())
+  name              String?
+  email             String?            @unique
+  emailVerified     DateTime?          @map("email_verified")
+  image             String?
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
+  accounts          Account[]
+  campaigns         Campaign[]
+  leads             Lead[]
+  sessions          Session[]
+  emailAccounts     EmailAccount[]
   emailSuppressions EmailSuppression[]
 
   @@map("users")
@@ -79,7 +79,7 @@ model Company {
   country         String?
   countryCode     String?    @map("country_code")
   verifiedDomain  Boolean    @default(false) @map("verified_domain")
-  researchSummary String?    @db.Text @map("research_summary")
+  researchSummary String?    @map("research_summary") @db.Text
   matchScore      Int        @default(0) @map("match_score")
   createdAt       DateTime   @default(now()) @map("created_at")
   updatedAt       DateTime   @updatedAt @map("updated_at")
@@ -91,22 +91,24 @@ model Company {
 }
 
 model Campaign {
-  id                 String   @id @default(cuid())
+  id                 String          @id @default(cuid())
   name               String
-  prompt             String   @db.Text
-  status             String   @default("Ready")
+  prompt             String          @db.Text
+  status             String          @default("Ready")
   selectedLeadIds    Json
   selectedLeads      Json
   emails             Json
   personalizedEmails Json?
   connectedEmail     String?
   provider           String?
-  sentCount          Int      @default(0) @map("sent_count")
-  failedCount        Int      @default(0) @map("failed_count")
-  createdAt          DateTime @default(now()) @map("created_at")
-  updatedAt          DateTime @updatedAt @map("updated_at")
-  userId             String?  @map("user_id")
-  user               User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  emailAccountId     String?         @map("email_account_id")
+  sentCount          Int             @default(0) @map("sent_count")
+  failedCount        Int             @default(0) @map("failed_count")
+  createdAt          DateTime        @default(now()) @map("created_at")
+  updatedAt          DateTime        @updatedAt @map("updated_at")
+  userId             String?         @map("user_id")
+  user               User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+  emailAccount       EmailAccount?   @relation(fields: [emailAccountId], references: [id], onDelete: SetNull)
   leads              Lead[]
   emailDeliveries    EmailDelivery[]
 
@@ -115,21 +117,21 @@ model Campaign {
 }
 
 model EmailDelivery {
-  id         String   @id @default(cuid())
-  campaignId String   @map("campaign_id")
-  leadId     String   @map("lead_id")
-  step       Int
-  recipient  String
-  senderEmail String? @map("sender_email")
-  subject    String   @db.Text
-  body       String   @db.Text
-  status     String   @default("Sending")
-  messageId  String?  @map("message_id")
-  error      String?  @db.Text
-  sentAt     DateTime? @map("sent_at")
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
-  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  id          String    @id @default(cuid())
+  campaignId  String    @map("campaign_id")
+  leadId      String    @map("lead_id")
+  step        Int
+  recipient   String
+  senderEmail String?   @map("sender_email")
+  subject     String    @db.Text
+  body        String    @db.Text
+  status      String    @default("Sending")
+  messageId   String?   @map("message_id")
+  error       String?   @db.Text
+  sentAt      DateTime? @map("sent_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  campaign    Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 
   @@unique([campaignId, leadId, step])
   @@index([campaignId, status])
@@ -163,7 +165,7 @@ model Lead {
   emailVerified       Boolean    @default(false) @map("email_verified")
   emailVerifyStatus   String?    @map("email_verify_status")
   verificationTag     String     @default("Review contact") @map("verification_tag")
-  matchReason         String     @db.Text @map("match_reason")
+  matchReason         String     @map("match_reason") @db.Text
   matchScore          Int        @default(0) @map("match_score")
   status              String     @default("Discovered")
   createdAt           DateTime   @default(now()) @map("created_at")
@@ -222,16 +224,21 @@ model JobResult {
 
   @@map("job_results")
 }
-model EmailAccount {
-  id          String   @id @default(cuid())
-  userId      String
-  email       String
-  displayName String   @default("") @map("display_name")
-  sendLockUntil DateTime? @map("send_lock_until")
-  appPassword String   @db.Text
-  createdAt   DateTime @default(now())
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+model EmailAccount {
+  id             String    @id @default(cuid())
+  userId         String
+  email          String
+  displayName    String    @default("") @map("display_name")
+  sendLockUntil  DateTime? @map("send_lock_until")
+  accessToken    String?   @map("access_token") @db.Text
+  refreshToken   String?   @map("refresh_token") @db.Text
+  tokenExpiresAt DateTime? @map("token_expires_at")
+  status         String    @default("reconnect_required")
+  createdAt      DateTime  @default(now())
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  campaigns Campaign[]
 
   @@unique([userId, email])
 }

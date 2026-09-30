@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/auth";
 import { db } from "@/lib/db";
-import { decrypt } from "@/lib/crypto";
+import { getGmailSenderCredentials } from "@/lib/gmailSender";
 import { sendEmail, type SmtpCredentials } from "@/workers/processors/emailWorker";
 import type { Lead } from "@/types";
 
@@ -122,7 +122,7 @@ export async function GET() {
       orderBy: { createdAt: "desc" },
     });
 
-    const userPrimaryEmail = emailAccounts[0]?.email || session.user.email || "you@leadlens.ai";
+    const userPrimaryEmail = emailAccounts[0]?.email || "";
     const userDisplayName = emailAccounts[0]?.displayName || session.user.name || "You";
 
     // 5. Build lookup maps for leads
@@ -390,60 +390,52 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Email message body cannot be empty." }, { status: 400 });
     }
 
-    // Find the sending email account
-    let emailAccount = null;
-    if (senderEmail) {
-      emailAccount = await db.emailAccount.findUnique({
-        where: { userId_email: { userId, email: senderEmail } },
-      });
-    }
-
-    if (!emailAccount) {
-      emailAccount = await db.emailAccount.findFirst({
-        where: { userId },
-        orderBy: { createdAt: "desc" },
-      });
-    }
-
-    if (!emailAccount) {
-      return NextResponse.json(
-        { error: "No connected Gmail account found. Please connect your Gmail account in Settings or Campaign Setup." },
-        { status: 400 }
-      );
-    }
-
-    // Decrypt credentials
-    const appPassword = decrypt(emailAccount.appPassword);
-    const credentials: SmtpCredentials = {
-      email: emailAccount.email,
-      appPassword,
-      displayName: emailAccount.displayName || undefined,
-    };
-
-    // Find or assign campaign
+    let emailAccount;
     let targetCampaignId = campaignId;
-    if (!targetCampaignId) {
-      const existingCampaign = await db.campaign.findFirst({
-        where: { userId },
-        orderBy: { updatedAt: "desc" },
+    if (targetCampaignId) {
+      const campaign = await db.campaign.findFirst({
+        where: { id: targetCampaignId, userId },
+        select: { id: true, emailAccountId: true, connectedEmail: true },
       });
-      if (existingCampaign) {
-        targetCampaignId = existingCampaign.id;
-      } else {
-        const newCampaign = await db.campaign.create({
-          data: {
-            userId,
-            name: "Direct Outreach",
-            prompt: "Direct outbound message from Inbox",
-            status: "Live",
-            selectedLeadIds: leadId ? [leadId] : [],
-            selectedLeads: [],
-            emails: [],
-            connectedEmail: emailAccount.email,
-          },
-        });
-        targetCampaignId = newCampaign.id;
+      if (!campaign) return NextResponse.json({ error: "Campaign not found or access denied." }, { status: 404 });
+      if (!campaign.emailAccountId) return NextResponse.json({ error: "Reconnect Gmail for this campaign before replying." }, { status: 400 });
+      emailAccount = await db.emailAccount.findFirst({
+        where: { id: campaign.emailAccountId, userId },
+      });
+      if (!emailAccount || campaign.connectedEmail?.toLowerCase() !== emailAccount.email.toLowerCase()) {
+        return NextResponse.json({ error: "Reconnect Gmail for this campaign before replying." }, { status: 400 });
       }
+    } else {
+      if (!senderEmail) return NextResponse.json({ error: "Choose a connected Gmail account before sending." }, { status: 400 });
+      emailAccount = await db.emailAccount.findFirst({
+        where: { userId, email: senderEmail, status: "connected" },
+      });
+      if (!emailAccount) return NextResponse.json({ error: "The selected Gmail account is not connected. Reconnect it before sending." }, { status: 400 });
+    }
+
+    let credentials: SmtpCredentials;
+    try {
+      credentials = await getGmailSenderCredentials(emailAccount.id, userId);
+    } catch (senderError) {
+      return NextResponse.json({ error: senderError instanceof Error ? senderError.message : "Reconnect Gmail before sending." }, { status: 400 });
+    }
+
+    if (!targetCampaignId) {
+      const newCampaign = await db.campaign.create({
+        data: {
+          userId,
+          name: "Direct Outreach",
+          prompt: "Direct outbound message from Inbox",
+          status: "Live",
+          selectedLeadIds: leadId ? [leadId] : [],
+          selectedLeads: [],
+          emails: [],
+          emailAccountId: emailAccount.id,
+          connectedEmail: emailAccount.email,
+          provider: "Google Workspace / Gmail",
+        },
+      });
+      targetCampaignId = newCampaign.id;
     }
 
     // Calculate next step number
@@ -455,13 +447,25 @@ export async function POST(request: NextRequest) {
     });
 
     // Send email using Nodemailer
-    const sendResult = await sendEmail({
-      to: recipient,
-      subject,
-      body: messageBody,
-      fromName: credentials.displayName,
-      credentials,
-    });
+    let sendResult: Awaited<ReturnType<typeof sendEmail>>;
+    try {
+      sendResult = await sendEmail({
+        to: recipient,
+        subject,
+        body: messageBody,
+        fromName: credentials.displayName,
+        credentials,
+      });
+    } catch (sendError) {
+      const message = sendError instanceof Error ? sendError.message : "Gmail send failed.";
+      if (/Gmail rejected this authorization/i.test(message)) {
+        await db.emailAccount.updateMany({
+          where: { id: emailAccount.id, userId },
+          data: { status: "reconnect_required" },
+        });
+      }
+      return NextResponse.json({ error: message }, { status: 400 });
+    }
 
     // Record delivery in database
     const delivery = await db.emailDelivery.create({

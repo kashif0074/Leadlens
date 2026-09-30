@@ -49,10 +49,7 @@ interface CampaignsModuleProps {
   onImportCsvLeads?: (leads: Lead[]) => void;
 }
 
-const steps = ["Leads", "Send emails", "Connect inbox", "Sending", "Warmup", "Review", "Launch"];
-const providers = [
-  { name: "Google Workspace / Gmail", description: "Send through your own verified Gmail account.", icon: Mail },
-];
+const steps = ["Leads", "Connect inbox", "Send emails", "Sending", "Warmup", "Review", "Launch"];
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 type CampaignEmail = Campaign["sequence"][number];
@@ -266,9 +263,8 @@ export default function CampaignsModule({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(
     () => new Set(launchContext?.selectedLeadIds ?? campaign?.selectedLeadIds ?? []),
   );
-  const [provider, setProvider] = useState(launchContext?.provider ?? campaign?.provider ?? "");
-  const [email, setEmail] = useState(launchContext?.connectedEmail ?? campaign?.connectedEmail ?? "");
-  const [providerModal, setProviderModal] = useState<string | null>(null);
+  const [provider, setProvider] = useState(campaign?.provider ?? "");
+  const [email, setEmail] = useState(campaign?.connectedEmail ?? "");
   const [sendingSaved, setSendingSaved] = useState(() => campaign?.status === "Live");
   const [warmupAcknowledged, setWarmupAcknowledged] = useState(() => campaign?.status === "Live");
   const [toast, setToast] = useState("");
@@ -295,8 +291,6 @@ export default function CampaignsModule({
       if (launchContext?.selectedLeadIds?.length) {
         setSelectedIds(new Set(launchContext.selectedLeadIds));
       }
-      if (launchContext?.connectedEmail) setEmail(launchContext.connectedEmail);
-      if (launchContext?.provider) setProvider(launchContext.provider);
     }, 0);
     return () => window.clearTimeout(syncContext);
   }, [launchContext]);
@@ -315,10 +309,10 @@ export default function CampaignsModule({
     if (campaign?.selectedLeadIds && Array.isArray(campaign.selectedLeadIds) && (!launchContext?.selectedLeadIds || launchContext.selectedLeadIds.length === 0)) {
       setSelectedIds(new Set(campaign.selectedLeadIds as string[]));
     }
-    if (campaign?.connectedEmail && !launchContext?.connectedEmail) {
+    if (campaign?.connectedEmail) {
       setEmail(campaign.connectedEmail);
     }
-    if (campaign?.provider && !launchContext?.provider) {
+    if (campaign?.provider) {
       setProvider(campaign.provider);
     }
     if (campaign?.status === "Live") {
@@ -357,8 +351,16 @@ export default function CampaignsModule({
     if (!response.ok) throw new Error(result.error ?? "Unable to save this Gmail account for the campaign.");
     setEmail(result.connectedEmail ?? account.email);
     setProvider(result.provider ?? "Google Workspace / Gmail");
-    setProviderModal(null);
     notify("Gmail account verified and saved for this campaign.");
+  };
+
+  const disconnectConnectedAccount = async (accountId: string) => {
+    const response = await fetch(`/api/email-accounts?accountId=${encodeURIComponent(accountId)}`, { method: "DELETE" });
+    const result = (await response.json()) as { error?: string };
+    if (!response.ok) throw new Error(result.error ?? "Unable to disconnect Gmail.");
+    setEmail("");
+    setProvider("");
+    notify("Gmail account disconnected.");
   };
 
   const goTo = (next: SetupStep) => {
@@ -366,7 +368,7 @@ export default function CampaignsModule({
       notify("Select at least one lead before continuing.");
       return;
     }
-    if (next >= 3 && !emailPattern.test(email)) {
+    if (next >= 2 && !emailPattern.test(email)) {
       notify("Save a sending inbox before continuing.");
       return;
     }
@@ -923,7 +925,7 @@ export default function CampaignsModule({
         </section>
       )}
 
-      {step === 1 && (
+      {step === 2 && (
         <div className="grid items-start gap-5 2xl:grid-cols-[minmax(220px,0.8fr)_minmax(420px,1.45fr)_minmax(260px,0.85fr)]">
           <section className="surface panel !max-w-none">
             <div className="mt-5 rounded-xl bg-green-soft p-4">
@@ -989,36 +991,24 @@ export default function CampaignsModule({
                 </div>
               </div>
             )}
-            <CardActions onBack={() => goTo(0)} onNext={() => goTo(2)} nextLabel="Next: Connect inbox" disabled={!emailSequence.length} />
+            <CardActions onBack={() => goTo(1)} onNext={() => goTo(3)} nextLabel="Next: Sending settings" disabled={!emailSequence.length} />
           </section>
         </div>
       )}
 
-      {step === 2 && (
-        <SetupCard eyebrow="Setup step 2 of 6" title="Connect your sending inbox." description="Connect your own Gmail account once, then reuse it for campaigns.">
-          <div className="mt-6 grid gap-4 sm:grid-cols-3">
-            {providers.map((item) => {
-              const Icon = item.icon;
-              return (
-                <div key={item.name} className={`flex flex-col justify-between rounded-2xl border p-5 transition-colors ${provider === item.name ? "border-green bg-green-soft/40" : "border-line bg-canvas"}`}>
-                  <div>
-                    <Icon className="h-6 w-6 text-green" />
-                    <h3 className="mt-3 font-bold text-sm">{item.name}</h3>
-                    <p className="mt-1 text-xs text-muted">{item.description}</p>
-                  </div>
-                  <button type="button" onClick={() => setProviderModal(item.name)} className={`btn mt-4 text-xs ${provider === item.name ? "btn-primary" : "btn-secondary"}`}>
-                    {provider === item.name ? "Connected" : "Connect"}
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-          {provider && email && (
-            <div className="mt-5 rounded-xl border border-green/20 bg-green-soft p-4 text-xs font-semibold text-green-dark">
-              Connected: {provider} ({email})
-            </div>
+      {step === 1 && (
+        <SetupCard eyebrow="Setup step 1 of 6" title="Connect your sending inbox." description="Authorize the Gmail account that this campaign will send from.">
+          {campaign?.id ? (
+            <ConnectGmail
+              campaignId={campaign.id}
+              connectedEmail={email}
+              onConnected={saveConnectedAccount}
+              onDisconnected={disconnectConnectedAccount}
+            />
+          ) : (
+            <p className="mt-5 text-sm text-muted">Save the campaign before connecting Gmail.</p>
           )}
-          <CardActions onBack={() => goTo(1)} onNext={() => goTo(3)} nextLabel="Next: Sending settings" disabled={!provider || !email} />
+          <CardActions onBack={() => goTo(0)} onNext={() => goTo(2)} nextLabel="Next: Review emails" disabled={!provider || !email} />
         </SetupCard>
       )}
 
@@ -1134,19 +1124,6 @@ export default function CampaignsModule({
           </div>
           <CardActions onBack={() => goTo(5)} onNext={() => {}} nextLabel="Launched" disabled />
         </SetupCard>
-      )}
-
-      {/* Provider Modal */}
-      {providerModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 backdrop-blur-xs p-4" onClick={() => setProviderModal(null)}>
-          <div className="surface panel max-w-md w-full" role="dialog" aria-modal="true" aria-labelledby="connect-gmail-title" onClick={(event) => event.stopPropagation()}>
-            <h2 id="connect-gmail-title" className="mt-2 font-serif text-2xl font-bold">Connect your Gmail account</h2>
-            <ConnectGmail onConnected={saveConnectedAccount} />
-            <button className="btn btn-secondary mt-2 w-full text-xs" type="button" onClick={() => setProviderModal(null)}>
-              Cancel
-            </button>
-          </div>
-        </div>
       )}
 
       {/* Choice Modal */}

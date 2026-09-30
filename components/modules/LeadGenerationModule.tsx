@@ -30,7 +30,7 @@ export default function LeadGenerationModule({
   onConnectionComplete,
   onBackToLanding,
 }: LeadGenerationModuleProps) {
-  const { data: session, status } = useSession();
+  const { status } = useSession();
   const [loading, setLoading] = useState(!initialLeads || initialLeads.length === 0);
   const [allGeneratedLeads, setAllGeneratedLeads] = useState<Lead[]>(() => initialLeads || []);
   const [revealedAll, setRevealedAll] = useState(false);
@@ -138,8 +138,8 @@ export default function LeadGenerationModule({
       selectedLeadIds: selectedLeads.map((lead) => lead.id),
       selectedLeads,
       allLeads: allGeneratedLeads,
-      connectedEmail: session?.user?.email || "",
-      provider: "Google Workspace / Gmail",
+      connectedEmail: "",
+      provider: "",
     });
   };
 

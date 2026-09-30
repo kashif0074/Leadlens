@@ -49,7 +49,7 @@ export function createUnsubscribeUrl(userId: string, email: string) {
   if (!baseUrl) throw new Error("Set NEXTAUTH_URL to the public HTTPS app URL before sending campaign email.");
 
   const url = new URL("/api/unsubscribe", baseUrl);
-  if (url.protocol !== "https:" && url.hostname !== "localhost") {
+  if (url.protocol !== "https:" && url.hostname !== "localhost" && url.hostname !== "127.0.0.1") {
     throw new Error("NEXTAUTH_URL must use HTTPS for campaign unsubscribe links.");
   }
   url.searchParams.set("token", createUnsubscribeToken(userId, email));
