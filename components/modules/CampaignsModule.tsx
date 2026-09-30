@@ -226,6 +226,7 @@ export function validateAndParseCsv(
       matchScore: 95,
       status: "Discovered",
       linkedinUrl,
+      importSource: "csv",
     });
   }
 
@@ -336,6 +337,7 @@ export default function CampaignsModule({
   const brief = launchContext?.prompt ?? campaign?.brief ?? "";
   const launched = campaign?.status === "Live" || campaign?.status === "Partially sent";
   const liveCampaigns = campaigns.filter((c) => c.status === "Live");
+  const importedOnly = effectiveLeads.length > 0 && effectiveLeads.every((lead) => lead.importSource === "csv");
 
   const saveConnectedAccount = async (account: { id: string; email: string }) => {
     if (!campaign?.id) {
@@ -881,9 +883,13 @@ export default function CampaignsModule({
         <section className="w-full">
           <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
             <div>
-              <p className="eyebrow">All leads</p>
-              <h2 className="mt-1 text-2xl font-bold">Review your matching audience.</h2>
-              <p className="mt-2 text-sm text-muted">Search and filter the loaded lead list, then select who belongs in this campaign.</p>
+              <p className="eyebrow">{importedOnly ? "Imported leads" : "All leads"}</p>
+              <h2 className="mt-1 text-2xl font-bold">{importedOnly ? "Imported leads" : "Review your matching audience."}</h2>
+              <p className="mt-2 text-sm text-muted">
+                {importedOnly
+                  ? "Showing the records from your CSV import."
+                  : "Search and filter the loaded lead list, then select who belongs in this campaign."}
+              </p>
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -908,9 +914,11 @@ export default function CampaignsModule({
             }}
             onSelectAll={(ids = leads.map((lead) => lead.id)) => setSelectedIds(new Set(ids))}
             onClearAll={() => setSelectedIds(new Set())}
-            onAddToConnect={onAddToConnect}
+            onAddToConnect={importedOnly ? undefined : onAddToConnect}
             onContinue={() => goTo(1)}
             continueLabel="Continue to campaign setup"
+            showFilters={!importedOnly}
+            readOnly={importedOnly}
           />
         </section>
       )}

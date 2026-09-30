@@ -12,6 +12,7 @@ interface LeadsModuleProps {
 }
 
 export default function LeadsModule({ leads, connectedEmail, initialSelectedIds, onSendMail }: LeadsModuleProps) {
+  const importedOnly = leads.length > 0 && leads.every((lead) => lead.importSource === "csv");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(
     () => new Set(initialSelectedIds && initialSelectedIds.length > 0 ? initialSelectedIds : leads.map((l) => l.id)),
   );
@@ -38,8 +39,10 @@ export default function LeadsModule({ leads, connectedEmail, initialSelectedIds,
     <div className="w-full space-y-5">
       <div>
         <p className="eyebrow">Workplace · Leads</p>
-        <h1 className="font-serif text-2xl font-bold text-ink">All generated leads</h1>
-        <p className="mt-1 text-sm text-muted">Search and filter the loaded lead list. One lead is shown per row.</p>
+        <h1 className="font-serif text-2xl font-bold text-ink">{importedOnly ? "Imported leads" : "All generated leads"}</h1>
+        <p className="mt-1 text-sm text-muted">
+          {importedOnly ? "Showing the contacts imported from your CSV." : "Search and filter the loaded lead list. One lead is shown per row."}
+        </p>
       </div>
 
       {connectedEmail && (
@@ -61,6 +64,8 @@ export default function LeadsModule({ leads, connectedEmail, initialSelectedIds,
         onClearAll={() => setSelectedIds(new Set())}
         onContinue={handleContinue}
         continueLabel="Review campaign setup"
+        showFilters={!importedOnly}
+        readOnly={importedOnly}
       />
     </div>
   );

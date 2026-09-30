@@ -28,15 +28,24 @@ export type InboxMessage = {
   step?: number;
 };
 
-export type InboxConversation = {
+export type InboxEmailItem = {
   id: string;
-  leadId?: string;
+  threadId: string;
+  folder: "inbox" | "sent";
+  isUnread: boolean;
+  senderEmail: string;
+  senderName: string;
+  recipientEmail: string;
+  recipientName: string;
+  subject: string;
+  preview: string;
+  body: string;
+  status: string;
+  date: string;
   campaignId?: string;
   campaignName?: string;
-  recipient: string;
-  senderEmail: string;
-  status: "Contacted" | "Replied" | "Meeting Booked" | "Failed" | "Sending" | "Discovered";
-  lead: {
+  leadId?: string;
+  lead?: {
     id?: string;
     name: string;
     firstName?: string;
@@ -52,10 +61,7 @@ export type InboxConversation = {
     matchReason?: string;
     verificationTag?: string;
   };
-  lastMessageAt: string;
-  lastMessagePreview: string;
   messages: InboxMessage[];
-  unread?: boolean;
 };
 
 export async function GET() {
@@ -116,11 +122,13 @@ export async function GET() {
       orderBy: { createdAt: "desc" },
     });
 
+    const userPrimaryEmail = emailAccounts[0]?.email || session.user.email || "you@leadlens.ai";
+    const userDisplayName = emailAccounts[0]?.displayName || session.user.name || "You";
+
     // 5. Build lookup maps for leads
     const leadByEmailMap = new Map<string, Lead>();
     const leadByIdMap = new Map<string, Lead>();
 
-    // Index DB leads
     for (const lead of dbLeads) {
       const typedLead: Lead = {
         id: lead.id,
@@ -149,7 +157,6 @@ export async function GET() {
       if (lead.id) leadByIdMap.set(lead.id, typedLead);
     }
 
-    // Index campaign embedded leads
     for (const campaign of campaigns) {
       if (Array.isArray(campaign.selectedLeads)) {
         for (const rawLead of campaign.selectedLeads as unknown as Lead[]) {
@@ -166,21 +173,32 @@ export async function GET() {
       }
     }
 
-    // 6. Group deliveries into conversations
-    const conversationMap = new Map<string, InboxConversation>();
+    // 6. Group into conversations
+    const conversationMap = new Map<string, InboxEmailItem>();
+    const sentItems: InboxEmailItem[] = [];
+    const inboxItems: InboxEmailItem[] = [];
 
     for (const delivery of deliveries) {
       const recipientEmail = delivery.recipient.toLowerCase().trim();
       const leadInfo = leadByIdMap.get(delivery.leadId) || leadByEmailMap.get(recipientEmail);
       const convKey = recipientEmail || delivery.leadId;
 
+      const leadDisplayName =
+        leadInfo?.name ||
+        (leadInfo?.firstName && leadInfo?.lastName
+          ? `${leadInfo.firstName} ${leadInfo.lastName}`
+          : recipientEmail.split("@")[0]);
+
+      const isReplied = delivery.status === "Replied" || leadInfo?.status === "Replied" || leadInfo?.status === "Meeting Booked";
+
       const message: InboxMessage = {
         id: delivery.id,
         deliveryId: delivery.id,
         direction: delivery.status === "Replied" ? "inbound" : "outbound",
-        senderEmail: delivery.senderEmail || delivery.campaign?.connectedEmail || emailAccounts[0]?.email || "you@gmail.com",
+        senderEmail: delivery.senderEmail || delivery.campaign?.connectedEmail || userPrimaryEmail,
+        senderName: delivery.status === "Replied" ? leadDisplayName : userDisplayName,
         recipient: delivery.recipient,
-        recipientName: leadInfo?.name,
+        recipientName: delivery.status === "Replied" ? userDisplayName : leadDisplayName,
         subject: delivery.subject,
         body: delivery.body,
         status: delivery.status as InboxMessage["status"],
@@ -192,24 +210,23 @@ export async function GET() {
       };
 
       if (!conversationMap.has(convKey)) {
-        const leadDisplayName =
-          leadInfo?.name ||
-          (leadInfo?.firstName && leadInfo?.lastName
-            ? `${leadInfo.firstName} ${leadInfo.lastName}`
-            : recipientEmail.split("@")[0]);
-
-        const convStatus =
-          (leadInfo?.status as InboxConversation["status"]) ||
-          (delivery.status === "Sent" ? "Contacted" : delivery.status === "Failed" ? "Failed" : "Sending");
-
-        conversationMap.set(convKey, {
-          id: convKey,
-          leadId: leadInfo?.id || delivery.leadId,
+        const item: InboxEmailItem = {
+          id: delivery.id,
+          threadId: convKey,
+          folder: isReplied ? "inbox" : "sent",
+          isUnread: isReplied,
+          senderEmail: message.senderEmail,
+          senderName: userDisplayName,
+          recipientEmail: delivery.recipient,
+          recipientName: leadDisplayName,
+          subject: delivery.subject,
+          preview: delivery.body.slice(0, 140).replace(/[\r\n]+/g, " "),
+          body: delivery.body,
+          status: delivery.status,
+          date: message.sentAt || message.createdAt,
           campaignId: delivery.campaignId,
           campaignName: delivery.campaign?.name || "Outbound Campaign",
-          recipient: delivery.recipient,
-          senderEmail: message.senderEmail,
-          status: convStatus,
+          leadId: leadInfo?.id || delivery.leadId,
           lead: {
             id: leadInfo?.id,
             name: leadDisplayName,
@@ -221,53 +238,109 @@ export async function GET() {
             industry: leadInfo?.industry,
             location: leadInfo?.location,
             email: delivery.recipient,
-            status: leadInfo?.status || convStatus,
+            status: leadInfo?.status || (delivery.status === "Sent" ? "Contacted" : delivery.status),
             matchScore: leadInfo?.matchScore || 90,
             matchReason: leadInfo?.matchReason || "Discovered via ICP criteria",
             verificationTag: leadInfo?.verificationTag || "Email verified",
           },
-          lastMessageAt: message.sentAt || message.createdAt,
-          lastMessagePreview: delivery.body.slice(0, 120),
           messages: [message],
-        });
+        };
+        conversationMap.set(convKey, item);
       } else {
-        const existingConv = conversationMap.get(convKey)!;
-        existingConv.messages.push(message);
-        const msgTime = message.sentAt || message.createdAt;
-        if (new Date(msgTime) > new Date(existingConv.lastMessageAt)) {
-          existingConv.lastMessageAt = msgTime;
-          existingConv.lastMessagePreview = delivery.body.slice(0, 120);
-          if (delivery.status === "Failed") {
-            existingConv.status = "Failed";
-          } else if (delivery.status === "Sent" && existingConv.status !== "Replied" && existingConv.status !== "Meeting Booked") {
-            existingConv.status = "Contacted";
+        const existing = conversationMap.get(convKey)!;
+        existing.messages.push(message);
+        const msgDate = message.sentAt || message.createdAt;
+        if (new Date(msgDate) > new Date(existing.date)) {
+          existing.date = msgDate;
+          existing.subject = delivery.subject;
+          existing.preview = delivery.body.slice(0, 140).replace(/[\r\n]+/g, " ");
+          existing.body = delivery.body;
+          existing.status = delivery.status;
+          if (isReplied) {
+            existing.folder = "inbox";
+            existing.isUnread = true;
           }
         }
       }
+
+      // Also create an individual sent item record
+      sentItems.push({
+        id: delivery.id,
+        threadId: convKey,
+        folder: "sent",
+        isUnread: false,
+        senderEmail: message.senderEmail,
+        senderName: userDisplayName,
+        recipientEmail: delivery.recipient,
+        recipientName: leadDisplayName,
+        subject: delivery.subject,
+        preview: delivery.body.slice(0, 140).replace(/[\r\n]+/g, " "),
+        body: delivery.body,
+        status: delivery.status,
+        date: message.sentAt || message.createdAt,
+        campaignId: delivery.campaignId,
+        campaignName: delivery.campaign?.name || "Outbound Campaign",
+        leadId: leadInfo?.id || delivery.leadId,
+        lead: {
+          id: leadInfo?.id,
+          name: leadDisplayName,
+          firstName: leadInfo?.firstName,
+          lastName: leadInfo?.lastName,
+          jobTitle: leadInfo?.jobTitle || "Contact",
+          role: leadInfo?.role,
+          company: leadInfo?.company || "Organization",
+          industry: leadInfo?.industry,
+          location: leadInfo?.location,
+          email: delivery.recipient,
+          status: leadInfo?.status || delivery.status,
+          matchScore: leadInfo?.matchScore || 90,
+          matchReason: leadInfo?.matchReason || "Discovered via ICP criteria",
+          verificationTag: leadInfo?.verificationTag || "Email verified",
+        },
+        messages: [message],
+      });
     }
 
-    // Convert map to array and sort by last message date descending
-    const conversations = Array.from(conversationMap.values()).sort(
-      (a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime()
+    // Populate Inbox items from threads with replies or inbound messages
+    for (const thread of conversationMap.values()) {
+      if (thread.folder === "inbox" || thread.status === "Replied" || thread.lead?.status === "Replied" || thread.lead?.status === "Meeting Booked") {
+        inboxItems.push({
+          ...thread,
+          folder: "inbox",
+        });
+      }
+    }
+
+    // Sort descending by date
+    inboxItems.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    sentItems.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    const allThreads = Array.from(conversationMap.values()).sort(
+      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
     );
 
-    // Calculate aggregated statistics
     const totalSent = deliveries.filter((d) => d.status === "Sent").length;
     const totalFailed = deliveries.filter((d) => d.status === "Failed").length;
-    const repliedCount = conversations.filter((c) => c.status === "Replied").length;
-    const meetingsCount = conversations.filter((c) => c.status === "Meeting Booked").length;
+    const unreadInboxCount = inboxItems.filter((i) => i.isUnread).length;
 
     return NextResponse.json({
-      conversations,
+      inboxItems,
+      sentItems,
+      threads: allThreads,
       stats: {
-        totalConversations: conversations.length,
+        inboxCount: inboxItems.length,
+        unreadInboxCount,
+        sentCount: sentItems.length,
+        totalDeliveries: deliveries.length,
         totalSent,
         totalFailed,
-        repliedCount,
-        meetingsCount,
         connectedAccountsCount: emailAccounts.length,
       },
       connectedAccounts: emailAccounts,
+      currentUser: {
+        email: userPrimaryEmail,
+        name: userDisplayName,
+      },
     });
   } catch (error) {
     console.error("[API /api/inbox] Error loading inbox conversations:", error);
@@ -466,7 +539,6 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: `Invalid status. Must be one of: ${validStatuses.join(", ")}` }, { status: 400 });
     }
 
-    // Update lead in DB
     if (leadId) {
       await db.lead.updateMany({
         where: { id: leadId, userId },

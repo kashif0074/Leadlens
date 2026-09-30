@@ -21,6 +21,7 @@ export type Lead = {
   matchScore: number;
   status?: 'Discovered' | 'Contacted' | 'Replied' | 'Meeting Booked';
   linkedinUrl?: string;
+  importSource?: "csv";
 };
 
 export type Campaign = {

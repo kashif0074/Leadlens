@@ -457,7 +457,7 @@ export default function DashboardAppClient() {
       {currentModule !== "lead-generation" && !isStandaloneCampaign ? (
         <AppShell
           currentModule={currentModule}
-          hideSidebar={false}
+          hideSidebar={currentModule === "inbox"}
           workspaceStatus={workspaceStatus}
           onSelectModule={(mod) => {
             setStandaloneCampaignEntry(false);
@@ -519,7 +519,7 @@ export default function DashboardAppClient() {
           {currentModule === "inbox" && (
             <InboxModule
               launched={liveCampaigns.length > 0}
-              onNavigate={(mod) => setCurrentModule(mod === "campaigns" ? "campaign" : (mod as any))}
+              onNavigate={(mod) => setCurrentModule(mod === "campaigns" ? "campaign" : (mod as AppModule))}
               connectedEmail={campaignLaunchContext?.connectedEmail}
             />
           )}

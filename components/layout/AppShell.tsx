@@ -304,12 +304,31 @@ export default function AppShell({
                 <Menu className="h-4 w-4" />
               </button>
             )}
-            {hideSidebar && <LeadLensLogo variant="nav" />}
+            {hideSidebar && (
+              <button
+                type="button"
+                onClick={() => onSelectModule("dashboard")}
+                className="cursor-pointer hover:opacity-85 transition-opacity flex items-center gap-2"
+                title="Go to Dashboard"
+              >
+                <LeadLensLogo variant="nav" />
+              </button>
+            )}
             <h2 className="truncate font-serif text-lg font-bold capitalize text-ink sm:text-xl">
               {moduleTitle(currentModule)}
             </h2>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            {currentModule === "inbox" && (
+              <button
+                type="button"
+                onClick={() => onSelectModule("dashboard")}
+                className="rounded-full border border-line bg-white px-3.5 py-1.5 text-xs font-semibold text-ink hover:bg-mist cursor-pointer transition-colors hidden sm:inline-flex items-center gap-1.5"
+              >
+                <House className="h-3.5 w-3.5 text-muted" />
+                <span>Dashboard</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={onOpenPrompt}
@@ -351,7 +370,13 @@ export default function AppShell({
           </nav>
         )}
 
-        <main className={`min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-4 sm:p-6 lg:p-8 ${hideSidebar ? "pb-8" : "pb-24 md:pb-8"}`}>
+        <main
+          className={`min-w-0 flex-1 ${
+            currentModule === "inbox"
+              ? "overflow-hidden p-0 h-[calc(100vh-4rem)] flex flex-col"
+              : `overflow-x-hidden overflow-y-auto p-4 sm:p-6 lg:p-8 ${hideSidebar ? "pb-8" : "pb-24 md:pb-8"}`
+          }`}
+        >
           {children}
         </main>
       </div>

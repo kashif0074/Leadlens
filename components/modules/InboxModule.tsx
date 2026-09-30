@@ -3,27 +3,25 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Inbox as InboxIcon,
-  Search,
   Send,
   RefreshCw,
-  Mail,
-  User,
-  Building2,
-  CalendarCheck,
+  Search,
+  ArrowLeft,
   CheckCircle2,
   AlertCircle,
-  Clock,
-  ArrowRight,
-  ChevronRight,
-  ChevronLeft,
   Sparkles,
-  MapPin,
-  Briefcase,
-  Layers,
   Check,
-  RotateCcw,
+  CornerUpLeft,
+  X,
+  SlidersHorizontal,
+  Menu,
+  Building2,
+  MessageSquare,
+  ShieldCheck,
+  Tag,
+  Copy,
 } from "lucide-react";
-import type { InboxConversation, InboxMessage } from "@/app/api/inbox/route";
+import type { InboxEmailItem } from "@/app/api/inbox/route";
 
 interface InboxModuleProps {
   launched?: boolean;
@@ -31,30 +29,38 @@ interface InboxModuleProps {
   connectedEmail?: string;
 }
 
-function formatRelativeTime(dateStr: string): string {
+type ActiveFolder = "inbox" | "sent";
+type StatusFilter = "all" | "replied" | "meetings" | "contacted" | "failed";
+
+function formatListDate(dateStr: string): string {
   try {
     const date = new Date(dateStr);
     const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / (1000 * 60));
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    const isToday =
+      date.getDate() === now.getDate() &&
+      date.getMonth() === now.getMonth() &&
+      date.getFullYear() === now.getFullYear();
 
-    if (diffMins < 1) return "Just now";
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays === 1) return "Yesterday";
-    if (diffDays < 7) return `${diffDays}d ago`;
-    return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    if (isToday) {
+      return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true });
+    }
+
+    const isThisYear = date.getFullYear() === now.getFullYear();
+    if (isThisYear) {
+      return date.toLocaleDateString([], { month: "short", day: "numeric" });
+    }
+
+    return date.toLocaleDateString([], { month: "short", day: "numeric", year: "2-digit" });
   } catch {
     return dateStr;
   }
 }
 
-function formatExactDateTime(dateStr: string): string {
+function formatDetailDate(dateStr: string): string {
   try {
     const date = new Date(dateStr);
-    return date.toLocaleString(undefined, {
+    return date.toLocaleString([], {
+      weekday: "short",
       month: "short",
       day: "numeric",
       year: "numeric",
@@ -67,62 +73,91 @@ function formatExactDateTime(dateStr: string): string {
   }
 }
 
+const AVATAR_GRADIENTS = [
+  "from-emerald-600 to-teal-700",
+  "from-blue-600 to-indigo-700",
+  "from-violet-600 to-purple-700",
+  "from-amber-600 to-orange-700",
+  "from-rose-600 to-pink-700",
+  "from-cyan-600 to-blue-700",
+];
+
+function getAvatarGradient(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const index = Math.abs(hash) % AVATAR_GRADIENTS.length;
+  return AVATAR_GRADIENTS[index];
+}
+
 export default function InboxModule({
-  launched = false,
-  onNavigate,
   connectedEmail,
 }: InboxModuleProps) {
-  const [conversations, setConversations] = useState<InboxConversation[]>([]);
+  // Collapsible Left Navigation State
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+
+  // Folder Navigation State
+  const [activeFolder, setActiveFolder] = useState<ActiveFolder>("inbox");
+
+  // Filters State
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [campaignFilter, setCampaignFilter] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Data States
+  const [inboxItems, setInboxItems] = useState<InboxEmailItem[]>([]);
+  const [sentItems, setSentItems] = useState<InboxEmailItem[]>([]);
   const [stats, setStats] = useState({
-    totalConversations: 0,
+    inboxCount: 0,
+    unreadInboxCount: 0,
+    sentCount: 0,
+    totalDeliveries: 0,
     totalSent: 0,
     totalFailed: 0,
-    repliedCount: 0,
-    meetingsCount: 0,
     connectedAccountsCount: 0,
   });
   const [connectedAccounts, setConnectedAccounts] = useState<
     { id: string; email: string; displayName: string }[]
   >([]);
+  const [currentUser, setCurrentUser] = useState({ email: "", name: "" });
 
+  // UI States
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
+  const [copiedEmail, setCopiedEmail] = useState(false);
 
-  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [campaignFilter, setCampaignFilter] = useState<string>("all");
-
-  // Reply Composer State
+  // Quick Reply Composer State inside Email Reading View
+  const [showReplyBox, setShowReplyBox] = useState(false);
   const [replySubject, setReplySubject] = useState("");
   const [replyBody, setReplyBody] = useState("");
   const [isSendingReply, setIsSendingReply] = useState(false);
   const [replyError, setReplyError] = useState<string | null>(null);
   const [replySuccess, setReplySuccess] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [showRecipientDetails, setShowRecipientDetails] = useState(false);
 
-  // Fetch real inbox data from backend API
-  const fetchInbox = useCallback(async (isManual = false) => {
+  // Fetch real email data from /api/inbox
+  const fetchEmails = useCallback(async (isManual = false) => {
     if (isManual) setIsRefreshing(true);
-    else setIsLoading(true);
     setError(null);
 
     try {
       const res = await fetch("/api/inbox", { cache: "no-store" });
       if (!res.ok) {
-        throw new Error(`Failed to load inbox (HTTP ${res.status})`);
+        throw new Error(`Failed to load mail (HTTP ${res.status})`);
       }
       const data = await res.json();
-      setConversations(data.conversations || []);
+      setInboxItems(data.inboxItems || []);
+      setSentItems(data.sentItems || []);
       if (data.stats) setStats(data.stats);
       if (data.connectedAccounts) setConnectedAccounts(data.connectedAccounts);
-
-      // Auto-select first conversation if none selected
-      setSelectedConversationId((prev) => prev || (data.conversations?.length > 0 ? data.conversations[0].id : null));
+      if (data.currentUser) setCurrentUser(data.currentUser);
     } catch (err) {
       console.error("[InboxModule] Load error:", err);
-      setError(err instanceof Error ? err.message : "Unable to load inbox conversations.");
+      setError(err instanceof Error ? err.message : "Unable to load mail.");
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -134,17 +169,18 @@ export default function InboxModule({
     const load = async () => {
       try {
         const res = await fetch("/api/inbox", { cache: "no-store" });
-        if (!res.ok) throw new Error(`Failed to load inbox (HTTP ${res.status})`);
+        if (!res.ok) throw new Error(`Failed to load mail (HTTP ${res.status})`);
         const data = await res.json();
         if (isMounted) {
-          setConversations(data.conversations || []);
+          setInboxItems(data.inboxItems || []);
+          setSentItems(data.sentItems || []);
           if (data.stats) setStats(data.stats);
           if (data.connectedAccounts) setConnectedAccounts(data.connectedAccounts);
-          setSelectedConversationId((prev) => prev || (data.conversations?.length > 0 ? data.conversations[0].id : null));
+          if (data.currentUser) setCurrentUser(data.currentUser);
         }
       } catch (err) {
         if (isMounted) {
-          setError(err instanceof Error ? err.message : "Unable to load inbox conversations.");
+          setError(err instanceof Error ? err.message : "Unable to load mail.");
         }
       } finally {
         if (isMounted) {
@@ -152,95 +188,138 @@ export default function InboxModule({
         }
       }
     };
-
     load();
     return () => {
       isMounted = false;
     };
   }, []);
 
-  // Selected conversation object
-  const activeConversation = useMemo(() => {
-    return conversations.find((c) => c.id === selectedConversationId) || null;
-  }, [conversations, selectedConversationId]);
-
-  const defaultSubject = useMemo(() => {
-    if (!activeConversation || activeConversation.messages.length === 0) return "";
-    const lastMsg = activeConversation.messages[activeConversation.messages.length - 1];
-    const prevSubject = lastMsg.subject || "";
-    return prevSubject.startsWith("Re:") ? prevSubject : `Re: ${prevSubject}`;
-  }, [activeConversation]);
-
-  // Current reply subject (controlled or derived)
-  const currentReplySubject = replySubject !== "" ? replySubject : defaultSubject;
-
-  const handleSelectConversation = (id: string) => {
-    setSelectedConversationId(id);
-    setReplySubject("");
-    setReplyBody("");
+  const handleBackToList = useCallback(() => {
+    setSelectedEmailId(null);
+    setShowReplyBox(false);
     setReplyError(null);
     setReplySuccess(false);
-  };
+  }, []);
 
-  // Extract unique campaign names for filtering
+  // Keyboard shortcut support: Ctrl+K / Cmd+K for search, Escape to return from email view
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        const searchInput = document.getElementById("inbox-search-input") as HTMLInputElement | null;
+        searchInput?.focus();
+      } else if (e.key === "Escape" && selectedEmailId) {
+        handleBackToList();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedEmailId, handleBackToList]);
+
+  // Current folder list of emails
+  const currentList = activeFolder === "inbox" ? inboxItems : sentItems;
+
+  // Available campaigns for dropdown
   const availableCampaigns = useMemo(() => {
-    const names = new Set<string>();
-    conversations.forEach((c) => {
-      if (c.campaignName) names.add(c.campaignName);
+    const list = new Set<string>();
+    [...inboxItems, ...sentItems].forEach((item) => {
+      if (item.campaignName) list.add(item.campaignName);
     });
-    return Array.from(names);
-  }, [conversations]);
+    return Array.from(list);
+  }, [inboxItems, sentItems]);
 
-  // Filter conversations
-  const filteredConversations = useMemo(() => {
-    return conversations.filter((c) => {
-      // Search query filter
+  // Filtered emails based on search query, status filter, and campaign filter
+  const filteredEmails = useMemo(() => {
+    return currentList.filter((item) => {
+      // 1. Search Query Filter
       if (searchQuery.trim()) {
-        const query = searchQuery.toLowerCase().trim();
-        const matchesName = c.lead.name?.toLowerCase().includes(query);
-        const matchesEmail = c.recipient?.toLowerCase().includes(query);
-        const matchesCompany = c.lead.company?.toLowerCase().includes(query);
-        const matchesSubject = c.messages.some((m) => m.subject?.toLowerCase().includes(query));
-        const matchesBody = c.messages.some((m) => m.body?.toLowerCase().includes(query));
-
-        if (!matchesName && !matchesEmail && !matchesCompany && !matchesSubject && !matchesBody) {
+        const q = searchQuery.toLowerCase().trim();
+        const nameMatch = (item.recipientName || item.senderName || "").toLowerCase().includes(q);
+        const emailMatch = (item.recipientEmail || item.senderEmail || "").toLowerCase().includes(q);
+        const subjectMatch = (item.subject || "").toLowerCase().includes(q);
+        const previewMatch = (item.preview || "").toLowerCase().includes(q);
+        const companyMatch = (item.lead?.company || "").toLowerCase().includes(q);
+        const campaignMatch = (item.campaignName || "").toLowerCase().includes(q);
+        if (!nameMatch && !emailMatch && !subjectMatch && !previewMatch && !companyMatch && !campaignMatch) {
           return false;
         }
       }
 
-      // Status filter
-      if (statusFilter === "replied" && c.status !== "Replied") return false;
-      if (statusFilter === "meetings" && c.status !== "Meeting Booked") return false;
-      if (statusFilter === "contacted" && c.status !== "Contacted" && c.status !== "Sending") return false;
-      if (statusFilter === "failed" && c.status !== "Failed") return false;
+      // 2. Status Filter
+      if (statusFilter === "replied" && item.status !== "Replied" && item.lead?.status !== "Replied") {
+        return false;
+      }
+      if (statusFilter === "meetings" && item.status !== "Meeting Booked" && item.lead?.status !== "Meeting Booked") {
+        return false;
+      }
+      if (statusFilter === "contacted" && item.status !== "Contacted" && item.status !== "Sent" && item.status !== "Sending") {
+        return false;
+      }
+      if (statusFilter === "failed" && item.status !== "Failed") {
+        return false;
+      }
 
-      // Campaign filter
-      if (campaignFilter !== "all" && c.campaignName !== campaignFilter) return false;
+      // 3. Campaign Filter
+      if (campaignFilter !== "all" && item.campaignName !== campaignFilter) {
+        return false;
+      }
 
       return true;
     });
-  }, [conversations, searchQuery, statusFilter, campaignFilter]);
+  }, [currentList, searchQuery, statusFilter, campaignFilter]);
 
-  // Handle sending reply
+  // Selected email item for Reading View
+  const selectedEmail = useMemo(() => {
+    if (!selectedEmailId) return null;
+    return (
+      inboxItems.find((i) => i.id === selectedEmailId || i.threadId === selectedEmailId) ||
+      sentItems.find((i) => i.id === selectedEmailId || i.threadId === selectedEmailId) ||
+      null
+    );
+  }, [selectedEmailId, inboxItems, sentItems]);
+
+  // Select an email
+  const handleOpenEmail = (email: InboxEmailItem) => {
+    setSelectedEmailId(email.id);
+    setShowReplyBox(false);
+    setReplyBody("");
+    setReplyError(null);
+    setReplySuccess(false);
+    const prevSub = email.subject || "";
+    setReplySubject(prevSub.startsWith("Re:") ? prevSub : `Re: ${prevSub}`);
+  };
+
+  const handleCopyEmail = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedEmail(true);
+    setTimeout(() => setCopiedEmail(false), 2000);
+  };
+
+  // Send reply handler
   const handleSendReply = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeConversation || !replyBody.trim()) return;
+    if (!selectedEmail || !replyBody.trim()) return;
 
     setIsSendingReply(true);
     setReplyError(null);
     setReplySuccess(false);
 
     try {
+      const recipientToReply =
+        activeFolder === "inbox"
+          ? selectedEmail.recipientEmail || selectedEmail.senderEmail
+          : selectedEmail.recipientEmail;
+
       const res = await fetch("/api/inbox", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          recipient: activeConversation.recipient,
-          subject: currentReplySubject.trim() || "Follow up",
+          recipient: recipientToReply,
+          subject: replySubject.trim() || "Follow up",
           body: replyBody.trim(),
-          campaignId: activeConversation.campaignId,
-          leadId: activeConversation.leadId,
-          senderEmail: activeConversation.senderEmail || connectedEmail || connectedAccounts[0]?.email,
+          campaignId: selectedEmail.campaignId,
+          leadId: selectedEmail.leadId,
+          senderEmail: selectedEmail.senderEmail || connectedEmail || connectedAccounts[0]?.email,
         }),
       });
 
@@ -252,39 +331,8 @@ export default function InboxModule({
       setReplySuccess(true);
       setReplyBody("");
 
-      // Optimistically append message to conversation list
-      if (data.delivery) {
-        const newMessage: InboxMessage = {
-          id: data.delivery.id,
-          direction: "outbound",
-          senderEmail: data.delivery.senderEmail,
-          recipient: data.delivery.recipient,
-          subject: data.delivery.subject,
-          body: data.delivery.body,
-          status: "Sent",
-          messageId: data.delivery.messageId,
-          sentAt: data.delivery.sentAt,
-          createdAt: data.delivery.createdAt,
-        };
-
-        setConversations((prev) =>
-          prev.map((c) => {
-            if (c.id === activeConversation.id) {
-              return {
-                ...c,
-                status: "Contacted",
-                lastMessageAt: data.delivery.sentAt || new Date().toISOString(),
-                lastMessagePreview: data.delivery.body.slice(0, 120),
-                messages: [...c.messages, newMessage],
-              };
-            }
-            return c;
-          })
-        );
-      }
-
-      // Re-fetch in background to ensure sync
-      fetchInbox();
+      // Re-fetch to get updated thread and sent list
+      await fetchEmails();
     } catch (err) {
       console.error("[InboxModule] Reply error:", err);
       setReplyError(err instanceof Error ? err.message : "Failed to send email reply.");
@@ -293,9 +341,9 @@ export default function InboxModule({
     }
   };
 
-  // Handle changing conversation / lead status
+  // Status update handler
   const handleUpdateStatus = async (newStatus: "Contacted" | "Replied" | "Meeting Booked") => {
-    if (!activeConversation) return;
+    if (!selectedEmail) return;
     setUpdatingStatus(true);
 
     try {
@@ -303,29 +351,14 @@ export default function InboxModule({
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          leadId: activeConversation.leadId,
-          recipient: activeConversation.recipient,
+          leadId: selectedEmail.leadId,
+          recipient: selectedEmail.recipientEmail,
           status: newStatus,
         }),
       });
 
-      if (!res.ok) {
-        throw new Error("Failed to update status");
-      }
-
-      // Update local state
-      setConversations((prev) =>
-        prev.map((c) => {
-          if (c.id === activeConversation.id) {
-            return {
-              ...c,
-              status: newStatus,
-              lead: { ...c.lead, status: newStatus },
-            };
-          }
-          return c;
-        })
-      );
+      if (!res.ok) throw new Error("Failed to update status");
+      await fetchEmails();
     } catch (err) {
       console.error("[InboxModule] Status update error:", err);
     } finally {
@@ -333,156 +366,132 @@ export default function InboxModule({
     }
   };
 
+  // Status Filter counts
+  const filterCounts = useMemo(() => {
+    return {
+      all: currentList.length,
+      replied: currentList.filter((i) => i.status === "Replied" || i.lead?.status === "Replied").length,
+      meetings: currentList.filter((i) => i.status === "Meeting Booked" || i.lead?.status === "Meeting Booked").length,
+      contacted: currentList.filter((i) => i.status === "Contacted" || i.status === "Sent" || i.status === "Sending").length,
+      failed: currentList.filter((i) => i.status === "Failed").length,
+    };
+  }, [currentList]);
+
   return (
-    <div className="mx-auto w-full max-w-7xl space-y-6">
-      {/* Header Section */}
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="eyebrow flex items-center gap-1.5">
-            <InboxIcon className="h-3.5 w-3.5 text-green" /> Reply management
-          </p>
-          <h1 className="mt-1 font-serif text-3xl font-bold tracking-tight text-ink">Inbox</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted">
-            Live outreach history, sent sequences, and prospect conversations across your campaigns.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2.5">
-          <button
-            type="button"
-            onClick={() => fetchInbox(true)}
-            disabled={isRefreshing || isLoading}
-            className="btn btn-secondary flex items-center gap-2 text-xs font-semibold cursor-pointer disabled:opacity-50"
-            title="Refresh inbox"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin text-green" : ""}`} />
-            <span>{isRefreshing ? "Syncing..." : "Sync Inbox"}</span>
-          </button>
-
-          {onNavigate && (
+    <div className="w-full h-full flex flex-col min-h-0 bg-[#FBFBFC] text-[#111827]">
+      {/* Top Header & Search Bar with Collapsible Menu Button */}
+      <div className="border-b border-[#E5E7EB] bg-white px-4 py-2.5 flex flex-col gap-2.5 shrink-0 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+        <div className="flex items-center justify-between gap-3">
+          {/* Menu Button + Omni Search Input */}
+          <div className="flex items-center gap-2.5 flex-1 max-w-2xl">
             <button
               type="button"
-              onClick={() => onNavigate("campaign")}
-              className="btn btn-primary flex items-center gap-1.5 text-xs font-semibold cursor-pointer"
+              onClick={() => setIsSidebarOpen((prev) => !prev)}
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#E5E7EB] bg-white text-[#374151] hover:bg-[#F3F4F6] hover:text-[#111827] transition-all cursor-pointer shadow-xs"
+              title={isSidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+              aria-label={isSidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
             >
-              <span>Campaigns</span>
-              <ArrowRight className="h-3.5 w-3.5" />
+              <Menu className="h-4 w-4" />
             </button>
-          )}
+
+            <div className="relative flex-1">
+              <Search className="absolute top-2.5 left-3 h-4 w-4 text-[#9CA3AF]" />
+              <input
+                id="inbox-search-input"
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder={`Search in ${activeFolder === "inbox" ? "Inbox" : "Sent"} by contact, company, subject, or content...`}
+                className="w-full h-9 pl-9 pr-14 rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] text-xs text-[#111827] placeholder:text-[#9CA3AF] focus:bg-white focus:border-[#059669] focus:ring-1 focus:ring-[#059669] transition-all outline-none"
+              />
+              <div className="absolute top-2 right-2.5 flex items-center gap-1">
+                {searchQuery ? (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery("")}
+                    className="text-[11px] text-[#9CA3AF] hover:text-[#111827] cursor-pointer"
+                  >
+                    Clear
+                  </button>
+                ) : (
+                  <kbd className="hidden sm:inline-block px-1.5 py-0.5 text-[10px] font-mono text-[#9CA3AF] bg-[#E5E7EB]/60 rounded-md">
+                    ⌘K
+                  </kbd>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Sync Button & Total Count */}
+          <div className="flex items-center gap-3 shrink-0">
+            <button
+              type="button"
+              onClick={() => fetchEmails(true)}
+              disabled={isRefreshing || isLoading}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-[#E5E7EB] bg-white px-3.5 py-1.5 text-xs font-semibold text-[#374151] hover:bg-[#F3F4F6] hover:text-[#111827] transition-all cursor-pointer shadow-xs disabled:opacity-50"
+              title="Sync mail with server"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin text-[#059669]" : "text-[#6B7280]"}`} />
+              <span className="hidden sm:inline">{isRefreshing ? "Syncing..." : "Sync Mail"}</span>
+            </button>
+
+            <span className="text-xs text-[#6B7280] font-medium hidden sm:inline">
+              {filteredEmails.length} {filteredEmails.length === 1 ? "conversation" : "conversations"}
+            </span>
+          </div>
         </div>
-      </header>
 
-      {/* Metrics Bar */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <div className="surface flex items-center gap-3.5 rounded-2xl p-4 border border-line">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-green/10 text-green">
-            <Mail className="h-5 w-5" />
-          </div>
-          <div>
-            <span className="block text-xs font-medium text-muted">Total Outreach</span>
-            <strong className="text-xl font-bold text-ink">{stats.totalSent}</strong>
-          </div>
-        </div>
-
-        <div className="surface flex items-center gap-3.5 rounded-2xl p-4 border border-line">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600">
-            <CheckCircle2 className="h-5 w-5" />
-          </div>
-          <div>
-            <span className="block text-xs font-medium text-muted">Conversations</span>
-            <strong className="text-xl font-bold text-ink">{stats.totalConversations}</strong>
-          </div>
-        </div>
-
-        <div className="surface flex items-center gap-3.5 rounded-2xl p-4 border border-line">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-500/10 text-blue-600">
-            <RotateCcw className="h-5 w-5" />
-          </div>
-          <div>
-            <span className="block text-xs font-medium text-muted">Replies</span>
-            <strong className="text-xl font-bold text-ink">{stats.repliedCount}</strong>
-          </div>
-        </div>
-
-        <div className="surface flex items-center gap-3.5 rounded-2xl p-4 border border-line">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-purple-500/10 text-purple-600">
-            <CalendarCheck className="h-5 w-5" />
-          </div>
-          <div>
-            <span className="block text-xs font-medium text-muted">Meetings Booked</span>
-            <strong className="text-xl font-bold text-ink">{stats.meetingsCount}</strong>
-          </div>
-        </div>
-      </div>
-
-      {/* Main Inbox Container */}
-      <div className="surface rounded-3xl border border-line overflow-hidden shadow-sm">
-        {/* Filter & Search Bar */}
-        <div className="flex flex-col gap-3 border-b border-line p-4 sm:flex-row sm:items-center sm:justify-between bg-mist/20">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute top-2.5 left-3 h-4 w-4 text-muted" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by prospect, company, subject, or message..."
-              className="input pl-9 text-xs w-full bg-white"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => setSearchQuery("")}
-                className="absolute top-2.5 right-3 text-xs text-muted hover:text-ink cursor-pointer"
-              >
-                Clear
-              </button>
-            )}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Status Filter Tabs */}
-            <div className="inline-flex rounded-xl bg-canvas p-1 border border-line text-xs font-semibold">
-              {[
-                { id: "all", label: "All", count: conversations.length },
-                { id: "contacted", label: "Contacted", count: stats.totalSent },
-                { id: "replied", label: "Replied", count: stats.repliedCount },
-                { id: "meetings", label: "Meetings", count: stats.meetingsCount },
-                ...(stats.totalFailed > 0
-                  ? [{ id: "failed", label: "Issues", count: stats.totalFailed }]
-                  : []),
-              ].map((tab) => (
+        {/* Filter Chips & Campaign Dropdown */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-[#F3F4F6]">
+          {/* Status Filter Tabs */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {[
+              { id: "all" as StatusFilter, label: "All", count: filterCounts.all, dot: "bg-[#6B7280]" },
+              { id: "replied" as StatusFilter, label: "Replied", count: filterCounts.replied, dot: "bg-[#059669]" },
+              { id: "meetings" as StatusFilter, label: "Meetings", count: filterCounts.meetings, dot: "bg-[#7C3AED]" },
+              { id: "contacted" as StatusFilter, label: "Contacted", count: filterCounts.contacted, dot: "bg-[#2563EB]" },
+              ...(filterCounts.failed > 0
+                ? [{ id: "failed" as StatusFilter, label: "Delivery Issues", count: filterCounts.failed, dot: "bg-[#DC2626]" }]
+                : []),
+            ].map((tab) => {
+              const active = statusFilter === tab.id;
+              return (
                 <button
                   key={tab.id}
                   type="button"
                   onClick={() => setStatusFilter(tab.id)}
-                  className={`rounded-lg px-2.5 py-1 transition-all cursor-pointer ${
-                    statusFilter === tab.id
-                      ? "bg-white text-ink font-bold shadow-xs"
-                      : "text-muted hover:text-ink"
+                  className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+                    active
+                      ? "bg-[#0F3E2E] text-white shadow-xs font-bold"
+                      : "text-[#4B5563] hover:bg-[#F3F4F6] hover:text-[#111827]"
                   }`}
                 >
-                  {tab.label}
+                  <span className={`h-1.5 w-1.5 rounded-full ${active ? "bg-emerald-300" : tab.dot}`} />
+                  <span>{tab.label}</span>
                   {tab.count > 0 && (
                     <span
-                      className={`ml-1.5 rounded-full px-1.5 py-0.2 text-[10px] ${
-                        statusFilter === tab.id
-                          ? "bg-green/10 text-green font-bold"
-                          : "bg-mist text-muted"
+                      className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${
+                        active
+                          ? "bg-white/20 text-white"
+                          : "bg-[#E5E7EB] text-[#4B5563]"
                       }`}
                     >
                       {tab.count}
                     </span>
                   )}
                 </button>
-              ))}
-            </div>
+              );
+            })}
+          </div>
 
-            {/* Campaign Dropdown Filter */}
-            {availableCampaigns.length > 1 && (
+          {/* Campaign Selector Filter */}
+          {availableCampaigns.length > 1 && (
+            <div className="flex items-center gap-1.5">
+              <SlidersHorizontal className="h-3.5 w-3.5 text-[#9CA3AF]" />
               <select
                 value={campaignFilter}
                 onChange={(e) => setCampaignFilter(e.target.value)}
-                className="input py-1 px-2.5 text-xs bg-white border border-line rounded-xl"
+                className="input py-1 px-2.5 text-xs bg-white border border-[#E5E7EB] rounded-lg text-[#374151] font-medium"
               >
                 <option value="all">All Campaigns</option>
                 {availableCampaigns.map((name) => (
@@ -491,412 +500,599 @@ export default function InboxModule({
                   </option>
                 ))}
               </select>
-            )}
-          </div>
+            </div>
+          )}
         </div>
+      </div>
 
-        {/* Error Alert */}
-        {error && (
-          <div className="m-4 flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 p-4 text-xs text-red-800">
-            <AlertCircle className="h-4 w-4 shrink-0 text-red-600" />
-            <span className="flex-1">{error}</span>
+      {/* Main Workspace Layout */}
+      <div className="flex-1 flex min-h-0 divide-x divide-[#E5E7EB] overflow-hidden">
+        {/* ========================================================= */}
+        {/* LEFT SIDEBAR: Collapsible Inbox / Sent Menu               */}
+        {/* ========================================================= */}
+        <aside
+          className={`${
+            isSidebarOpen
+              ? "w-52 lg:w-56 p-3 opacity-100"
+              : "w-0 p-0 border-r-0 opacity-0 overflow-hidden"
+          } shrink-0 bg-white flex flex-col justify-between border-r border-[#E5E7EB] transition-all duration-200 ease-in-out`}
+        >
+          <div className="space-y-1">
+            <div className="px-2 pb-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[#9CA3AF]">
+                Mailbox
+              </span>
+            </div>
+
+            {/* 1. Inbox Folder */}
             <button
               type="button"
-              onClick={() => fetchInbox(true)}
-              className="font-bold underline hover:text-red-950 cursor-pointer"
+              onClick={() => {
+                setActiveFolder("inbox");
+                setSelectedEmailId(null);
+              }}
+              className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-xs font-semibold transition-all cursor-pointer ${
+                activeFolder === "inbox"
+                  ? "bg-[#0F3E2E] text-white font-bold shadow-xs"
+                  : "text-[#374151] hover:bg-[#F3F4F6] hover:text-[#111827]"
+              }`}
             >
-              Retry
+              <div className="flex items-center gap-2.5">
+                <InboxIcon className={`h-4 w-4 ${activeFolder === "inbox" ? "text-white" : "text-[#6B7280]"}`} />
+                <span>Inbox</span>
+              </div>
+              {stats.inboxCount > 0 && (
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                    activeFolder === "inbox"
+                      ? "bg-white/20 text-white"
+                      : "bg-[#059669]/10 text-[#059669]"
+                  }`}
+                >
+                  {stats.inboxCount}
+                </span>
+              )}
+            </button>
+
+            {/* 2. Sent Folder */}
+            <button
+              type="button"
+              onClick={() => {
+                setActiveFolder("sent");
+                setSelectedEmailId(null);
+              }}
+              className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-xs font-semibold transition-all cursor-pointer ${
+                activeFolder === "sent"
+                  ? "bg-[#0F3E2E] text-white font-bold shadow-xs"
+                  : "text-[#374151] hover:bg-[#F3F4F6] hover:text-[#111827]"
+              }`}
+            >
+              <div className="flex items-center gap-2.5">
+                <Send className={`h-4 w-4 ${activeFolder === "sent" ? "text-white" : "text-[#6B7280]"}`} />
+                <span>Sent</span>
+              </div>
+              {stats.sentCount > 0 && (
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                    activeFolder === "sent"
+                      ? "bg-white/20 text-white"
+                      : "bg-[#F3F4F6] text-[#6B7280]"
+                  }`}
+                >
+                  {stats.sentCount}
+                </span>
+              )}
             </button>
           </div>
-        )}
 
-        {/* Loading State */}
-        {isLoading && (
-          <div className="p-16 text-center">
-            <RefreshCw className="mx-auto h-8 w-8 animate-spin text-green" />
-            <p className="mt-3 text-sm font-semibold text-muted">Loading inbox conversations...</p>
-          </div>
-        )}
-
-        {/* Empty State when no conversations exist at all */}
-        {!isLoading && conversations.length === 0 && (
-          <div className="p-16 text-center">
-            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-green/10 text-green">
-              <Send className="h-8 w-8" />
-            </div>
-            <h2 className="mt-4 text-xl font-bold text-ink">No conversations yet</h2>
-            <p className="mx-auto mt-2 max-w-md text-sm text-muted">
-              {launched
-                ? "Your campaign is active. Real conversations and sent outreach will appear here as emails are delivered."
-                : "Launch a campaign to start outreach. Sent messages and replies will automatically display in this inbox."}
-            </p>
-            {onNavigate && (
-              <button
-                type="button"
-                onClick={() => onNavigate("campaign")}
-                className="btn btn-primary mt-6 inline-flex items-center gap-2 text-xs font-semibold cursor-pointer"
-              >
-                <Mail className="h-4 w-4" /> Go to Campaigns
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* Split View Content */}
-        {!isLoading && conversations.length > 0 && (
-          <div className="grid min-h-[620px] grid-cols-1 lg:grid-cols-12 divide-y lg:divide-y-0 lg:divide-x divide-line">
-            {/* Left Pane: Conversation List */}
-            <div
-              className={`lg:col-span-4 xl:col-span-5 flex flex-col ${
-                selectedConversationId && activeConversation ? "hidden lg:flex" : "flex"
-              }`}
-            >
-              <div className="border-b border-line bg-canvas/40 px-4 py-2.5 text-[11px] font-semibold text-muted flex items-center justify-between">
-                <span>{filteredConversations.length} CONVERSATIONS</span>
-                <span className="text-[10px] text-muted">Real-time sync</span>
+          {/* Connected User Account Widget */}
+          <div className="pt-3 border-t border-[#E5E7EB]">
+            <div className="flex items-center gap-2.5 rounded-xl bg-[#F9FAFB] p-2.5 border border-[#E5E7EB]/80">
+              <div className="h-7 w-7 rounded-lg bg-[#0F3E2E] text-white flex items-center justify-center font-bold text-xs shrink-0">
+                {(currentUser.name?.[0] || currentUser.email?.[0] || "U").toUpperCase()}
               </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold text-[#111827] truncate">
+                  {currentUser.name || "Authenticated User"}
+                </p>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="text-[10px] text-[#059669] font-medium">SMTP Active</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </aside>
 
-              <div className="flex-1 overflow-y-auto divide-y divide-line max-h-[680px]">
-                {filteredConversations.length === 0 ? (
-                  <div className="p-8 text-center text-xs text-muted">
-                    No conversations match your search or active filter.
+        {/* ========================================================= */}
+        {/* RIGHT CONTENT: Email List OR Full Reading View            */}
+        {/* ========================================================= */}
+        <main className="flex-1 flex flex-col min-w-0 min-h-0 bg-white overflow-hidden">
+          {/* ------------------------------------------------------- */}
+          {/* CASE 1: EMAIL READING VIEW (Gmail / Superhuman Style)    */}
+          {/* ------------------------------------------------------- */}
+          {selectedEmail ? (
+            <div className="flex flex-col flex-1 min-h-0 overflow-hidden bg-white">
+              {/* Reading View Navigation Header */}
+              <div className="border-b border-[#E5E7EB] px-4 py-2.5 flex items-center justify-between bg-[#F9FAFB] shrink-0">
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={handleBackToList}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-[#E5E7EB] bg-white px-3 py-1.5 text-xs font-semibold text-[#374151] hover:bg-[#F3F4F6] hover:text-[#111827] transition-all cursor-pointer shadow-2xs"
+                    title="Back to list (Esc)"
+                  >
+                    <ArrowLeft className="h-3.5 w-3.5" />
+                    <span>Back to {activeFolder === "inbox" ? "Inbox" : "Sent"}</span>
+                  </button>
+                </div>
+
+                {/* Lead Status Action Switcher */}
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-[#6B7280] font-medium hidden sm:inline">Lead stage:</span>
+                  <div className="inline-flex rounded-xl bg-white p-0.5 border border-[#E5E7EB] text-xs shadow-2xs">
+                    {(["Contacted", "Replied", "Meeting Booked"] as const).map((st) => {
+                      const active = selectedEmail.lead?.status === st || selectedEmail.status === st;
+                      return (
+                        <button
+                          key={st}
+                          type="button"
+                          disabled={updatingStatus}
+                          onClick={() => handleUpdateStatus(st)}
+                          className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-all cursor-pointer ${
+                            active
+                              ? "bg-[#0F3E2E] text-white font-bold shadow-2xs"
+                              : "text-[#6B7280] hover:text-[#111827] hover:bg-[#F3F4F6]"
+                          }`}
+                        >
+                          {st}
+                        </button>
+                      );
+                    })}
                   </div>
-                ) : (
-                  filteredConversations.map((conv) => {
-                    const isSelected = conv.id === selectedConversationId;
-                    const initial = (conv.lead.name?.[0] || conv.recipient[0] || "C").toUpperCase();
-                    const lastMsg = conv.messages[conv.messages.length - 1];
-
-                    return (
-                      <button
-                        key={conv.id}
-                        type="button"
-                        onClick={() => handleSelectConversation(conv.id)}
-                        className={`w-full text-left p-4 transition-all cursor-pointer flex gap-3.5 items-start ${
-                          isSelected
-                            ? "bg-green-soft/40 border-l-4 border-l-green"
-                            : "hover:bg-mist/40 bg-white"
-                        }`}
-                      >
-                        {/* Avatar */}
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-sage/30 text-green font-bold text-sm">
-                          {initial}
-                        </div>
-
-                        {/* Summary Details */}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between gap-1">
-                            <span className="truncate text-sm font-bold text-ink">
-                              {conv.lead.name || conv.recipient}
-                            </span>
-                            <span className="shrink-0 text-[10px] font-medium text-muted">
-                              {formatRelativeTime(conv.lastMessageAt)}
-                            </span>
-                          </div>
-
-                          <div className="flex items-center gap-1.5 text-xs text-muted mt-0.5">
-                            <Building2 className="h-3 w-3 shrink-0" />
-                            <span className="truncate">{conv.lead.company || "Company"}</span>
-                            {conv.lead.jobTitle && (
-                              <>
-                                <span className="text-mist">•</span>
-                                <span className="truncate">{conv.lead.jobTitle}</span>
-                              </>
-                            )}
-                          </div>
-
-                          {/* Subject & Preview */}
-                          <p className="mt-1 text-xs font-semibold text-ink/90 truncate">
-                            {lastMsg?.subject || "Outreach"}
-                          </p>
-                          <p className="text-xs text-muted line-clamp-1 mt-0.5">
-                            {conv.lastMessagePreview || "No message preview"}
-                          </p>
-
-                          {/* Badges */}
-                          <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                            <span
-                              className={`status text-[10px] py-0.5 px-2 ${
-                                conv.status === "Replied"
-                                  ? "good"
-                                  : conv.status === "Meeting Booked"
-                                  ? "good bg-purple-50 text-purple-700 border-purple-200"
-                                  : conv.status === "Failed"
-                                  ? "bad"
-                                  : "bg-mist text-ink"
-                              }`}
-                            >
-                              {conv.status}
-                            </span>
-
-                            {conv.campaignName && (
-                              <span className="rounded-md bg-mist/60 px-1.5 py-0.5 text-[10px] text-muted truncate max-w-[130px]">
-                                {conv.campaignName}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        <ChevronRight className={`h-4 w-4 shrink-0 text-muted mt-2 ${isSelected ? "text-green" : ""}`} />
-                      </button>
-                    );
-                  })
-                )}
+                </div>
               </div>
-            </div>
 
-            {/* Right Pane: Conversation Details & Message Thread */}
-            <div
-              className={`lg:col-span-8 xl:col-span-7 flex flex-col bg-white ${
-                !selectedConversationId || !activeConversation ? "hidden lg:flex" : "flex"
-              }`}
-            >
-              {activeConversation ? (
-                <>
-                  {/* Lead & Conversation Header */}
-                  <div className="border-b border-line p-4 sm:p-5 flex flex-col gap-3 bg-canvas/30">
-                    <div className="flex items-center justify-between gap-2">
-                      {/* Back button on mobile */}
-                      <button
-                        type="button"
-                        onClick={() => setSelectedConversationId(null)}
-                        className="inline-flex items-center gap-1 text-xs font-semibold text-muted hover:text-ink lg:hidden cursor-pointer"
-                      >
-                        <ChevronLeft className="h-4 w-4" /> All Conversations
-                      </button>
-
-                      {/* Status Action Dropdown */}
-                      <div className="flex items-center gap-2 ml-auto">
-                        <span className="text-xs text-muted hidden sm:inline">Status:</span>
-                        <div className="inline-flex rounded-xl bg-white p-0.5 border border-line shadow-2xs text-xs">
-                          {(["Contacted", "Replied", "Meeting Booked"] as const).map((st) => (
-                            <button
-                              key={st}
-                              type="button"
-                              disabled={updatingStatus}
-                              onClick={() => handleUpdateStatus(st)}
-                              className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors cursor-pointer ${
-                                activeConversation.status === st
-                                  ? "bg-green text-white"
-                                  : "text-muted hover:text-ink"
-                              }`}
-                            >
-                              {st}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <div className="flex items-start gap-3">
-                        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-green/10 text-green font-bold text-lg">
-                          {(activeConversation.lead.name?.[0] || activeConversation.recipient[0] || "C").toUpperCase()}
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h2 className="text-lg font-bold text-ink">
-                              {activeConversation.lead.name || activeConversation.recipient}
-                            </h2>
-                            <span
-                              className={`status text-[10px] py-0.5 px-2 ${
-                                activeConversation.status === "Replied"
-                                  ? "good"
-                                  : activeConversation.status === "Meeting Booked"
-                                  ? "good bg-purple-50 text-purple-700 border-purple-200"
-                                  : activeConversation.status === "Failed"
-                                  ? "bad"
-                                  : "bg-mist text-ink"
-                              }`}
-                            >
-                              {activeConversation.status}
-                            </span>
-                          </div>
-
-                          <p className="text-xs text-muted flex flex-wrap items-center gap-2 mt-0.5">
-                            <span>{activeConversation.lead.jobTitle || "Contact"}</span>
-                            <span>•</span>
-                            <span>{activeConversation.lead.company || "Company"}</span>
-                            <span>•</span>
-                            <span className="font-mono text-ink/80">{activeConversation.recipient}</span>
-                          </p>
-                        </div>
-                      </div>
-
-                      {activeConversation.campaignName && (
-                        <div className="rounded-xl border border-sage/50 bg-green-soft/40 px-3 py-1.5 text-right shrink-0">
-                          <span className="block text-[10px] uppercase font-bold text-muted">Campaign</span>
-                          <span className="block text-xs font-semibold text-ink truncate max-w-[180px]">
-                            {activeConversation.campaignName}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Prospect ICP Research Context Pill */}
-                    {activeConversation.lead.matchReason && (
-                      <div className="mt-1 flex items-start gap-2 rounded-xl bg-mist/50 p-2.5 text-xs text-muted border border-line">
-                        <Sparkles className="h-4 w-4 shrink-0 text-green mt-0.5" />
-                        <div className="flex-1">
-                          <strong className="text-ink font-semibold">ICP Match ({activeConversation.lead.matchScore || 90}%): </strong>
-                          <span>{activeConversation.lead.matchReason}</span>
-                        </div>
+              {/* Scrollable Reading Content */}
+              <div className="flex-1 overflow-y-auto p-6 sm:p-8 space-y-6 max-w-5xl mx-auto w-full">
+                {/* Subject Heading */}
+                <div className="pb-4 border-b border-[#E5E7EB] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#111827]">
+                      {selectedEmail.subject || "(No Subject)"}
+                    </h1>
+                    {selectedEmail.campaignName && (
+                      <div className="flex items-center gap-1.5 mt-1.5 text-xs text-[#6B7280]">
+                        <Tag className="h-3.5 w-3.5 text-[#059669]" />
+                        <span>Campaign: <strong className="text-[#374151]">{selectedEmail.campaignName}</strong></span>
                       </div>
                     )}
                   </div>
 
-                  {/* Messages Timeline */}
-                  <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 max-h-[420px] bg-canvas/20">
-                    {activeConversation.messages.map((msg, index) => {
-                      const isOutbound = msg.direction === "outbound";
+                  <div className="shrink-0 flex items-center gap-2">
+                    <span
+                      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${
+                        selectedEmail.status === "Replied"
+                          ? "bg-emerald-50 text-[#059669] border border-emerald-200"
+                          : selectedEmail.status === "Meeting Booked"
+                          ? "bg-purple-50 text-purple-700 border border-purple-200"
+                          : selectedEmail.status === "Failed"
+                          ? "bg-rose-50 text-rose-700 border border-rose-200"
+                          : "bg-slate-100 text-slate-700 border border-slate-200"
+                      }`}
+                    >
+                      <span
+                        className={`h-1.5 w-1.5 rounded-full ${
+                          selectedEmail.status === "Replied"
+                            ? "bg-[#059669]"
+                            : selectedEmail.status === "Meeting Booked"
+                            ? "bg-purple-600"
+                            : selectedEmail.status === "Failed"
+                            ? "bg-rose-600"
+                            : "bg-slate-600"
+                        }`}
+                      />
+                      {selectedEmail.status}
+                    </span>
+                  </div>
+                </div>
 
-                      return (
-                        <div
-                          key={msg.id || index}
-                          className={`rounded-2xl border p-4 sm:p-5 transition-all shadow-xs ${
-                            isOutbound
-                              ? "bg-white border-line ml-0 md:ml-4"
-                              : "bg-green-soft/30 border-sage mr-0 md:mr-4"
-                          }`}
-                        >
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 border-b border-line/60 pb-3 text-xs">
-                            <div className="flex items-center gap-2">
-                              <span
-                                className={`rounded-md px-2 py-0.5 font-bold text-[10px] uppercase tracking-wider ${
-                                  isOutbound ? "bg-mist text-ink" : "bg-green text-white"
-                                }`}
-                              >
-                                {isOutbound ? "Outbound Email" : "Inbound Reply"}
-                              </span>
-                              <span className="font-semibold text-ink">
-                                {isOutbound ? `From: ${msg.senderEmail}` : `From: ${msg.recipient}`}
-                              </span>
+                {/* Message Thread History Cards */}
+                <div className="space-y-4">
+                  {selectedEmail.messages.map((msg, idx) => {
+                    const isLatest = idx === selectedEmail.messages.length - 1;
+                    const isOutbound = msg.direction === "outbound";
+                    const senderDisplayName = isOutbound
+                      ? currentUser.name || "You"
+                      : selectedEmail.recipientName || selectedEmail.recipientEmail;
+                    const senderAddress = msg.senderEmail;
+                    const recipientAddress = msg.recipient;
+                    const avatarInitial = (senderDisplayName[0] || senderAddress[0] || "U").toUpperCase();
+                    const avatarGradient = getAvatarGradient(senderDisplayName);
+
+                    return (
+                      <div
+                        key={msg.id || idx}
+                        className={`rounded-2xl border p-5 sm:p-6 transition-all ${
+                          isLatest
+                            ? "border-[#E5E7EB] bg-white shadow-xs"
+                            : "border-[#E5E7EB]/80 bg-[#F9FAFB]/70"
+                        }`}
+                      >
+                        {/* Message Header */}
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-start gap-3.5 min-w-0">
+                            <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${avatarGradient} text-white font-bold text-sm shadow-xs`}>
+                              {avatarInitial}
                             </div>
-                            <div className="flex items-center gap-2 text-muted">
-                              <Clock className="h-3.5 w-3.5" />
-                              <span>{formatExactDateTime(msg.sentAt || msg.createdAt)}</span>
-                            </div>
-                          </div>
-
-                          {/* Subject */}
-                          <div className="mt-3">
-                            <span className="text-xs font-bold text-ink">Subject: </span>
-                            <span className="text-xs font-semibold text-ink/90">{msg.subject}</span>
-                          </div>
-
-                          {/* Email Body */}
-                          <div className="mt-3 text-xs leading-relaxed text-ink/80 whitespace-pre-wrap font-sans bg-canvas/30 p-3 rounded-xl border border-line/40">
-                            {msg.body}
-                          </div>
-
-                          {/* Message Footer / Status */}
-                          <div className="mt-3 flex items-center justify-between text-[11px] text-muted">
-                            <div className="flex items-center gap-1.5">
-                              {msg.status === "Sent" ? (
-                                <span className="flex items-center gap-1 text-green font-semibold">
-                                  <Check className="h-3.5 w-3.5" /> Sent via Gmail SMTP
+                            <div className="min-w-0">
+                              <div className="flex items-baseline gap-2 flex-wrap">
+                                <strong className="text-sm font-bold text-[#111827]">
+                                  {senderDisplayName}
+                                </strong>
+                                <span className="text-xs text-[#6B7280]">
+                                  &lt;{senderAddress}&gt;
                                 </span>
-                              ) : msg.status === "Failed" ? (
-                                <span className="flex items-center gap-1 text-red-600 font-semibold">
-                                  <AlertCircle className="h-3.5 w-3.5" /> Delivery failed
-                                </span>
-                              ) : (
-                                <span>Status: {msg.status}</span>
-                              )}
+                              </div>
+                              <div className="text-xs text-[#6B7280] mt-0.5 flex items-center gap-1.5 flex-wrap">
+                                <span>to <strong className="text-[#374151]">{recipientAddress}</strong></span>
+                                <button
+                                  type="button"
+                                  onClick={() => setShowRecipientDetails((prev) => !prev)}
+                                  className="text-[10px] text-[#059669] hover:underline cursor-pointer"
+                                >
+                                  {showRecipientDetails ? "hide details" : "view details"}
+                                </button>
+                              </div>
                             </div>
+                          </div>
 
-                            {msg.step !== undefined && (
-                              <span className="text-[10px] text-muted">Step {msg.step}</span>
+                          <div className="text-right shrink-0 text-xs text-[#6B7280] font-medium">
+                            <time>{formatDetailDate(msg.sentAt || msg.createdAt)}</time>
+                          </div>
+                        </div>
+
+                        {/* Collapsible Technical Details */}
+                        {showRecipientDetails && (
+                          <div className="mt-3 rounded-xl bg-[#F9FAFB] p-3 text-xs text-[#4B5563] space-y-1.5 border border-[#E5E7EB] font-mono text-[11px]">
+                            <div><strong>From:</strong> {senderDisplayName} &lt;{senderAddress}&gt;</div>
+                            <div><strong>To:</strong> {recipientAddress}</div>
+                            <div><strong>Date:</strong> {formatDetailDate(msg.sentAt || msg.createdAt)}</div>
+                            <div><strong>Subject:</strong> {msg.subject}</div>
+                            {msg.messageId && <div><strong>Message-ID:</strong> {msg.messageId}</div>}
+                            <div className="flex items-center gap-1 text-[#059669] font-sans text-xs">
+                              <ShieldCheck className="h-3.5 w-3.5" />
+                              <span>Verified Transport via Google Workspace SMTP</span>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Email Body */}
+                        <div className="mt-4 text-sm leading-relaxed text-[#1F2937] whitespace-pre-wrap font-sans bg-[#FBFBFC]/50 p-4 rounded-xl border border-[#F3F4F6]">
+                          {msg.body}
+                        </div>
+
+                        {/* Message Footer Status */}
+                        <div className="mt-4 pt-3 border-t border-[#F3F4F6] flex items-center justify-between text-xs text-[#6B7280]">
+                          <div className="flex items-center gap-1.5">
+                            {msg.status === "Sent" ? (
+                              <span className="flex items-center gap-1 text-[#059669] font-semibold">
+                                <Check className="h-3.5 w-3.5" /> Sent via Gmail SMTP
+                              </span>
+                            ) : msg.status === "Failed" ? (
+                              <span className="flex items-center gap-1 text-rose-600 font-semibold">
+                                <AlertCircle className="h-3.5 w-3.5" /> Delivery failed
+                              </span>
+                            ) : (
+                              <span>Status: {msg.status}</span>
                             )}
                           </div>
-
-                          {/* Error Banner if send failed */}
-                          {msg.error && (
-                            <div className="mt-2 rounded-xl bg-red-50 p-2.5 text-xs text-red-700 border border-red-200">
-                              <strong>Delivery Error:</strong> {msg.error}
-                            </div>
+                          {msg.step !== undefined && (
+                            <span className="text-[11px] text-[#6B7280] font-mono">Sequence Step {msg.step}</span>
                           )}
                         </div>
-                      );
-                    })}
-                  </div>
-
-                  {/* Reply Composer Form */}
-                  <div className="border-t border-line p-4 sm:p-5 bg-white">
-                    <form onSubmit={handleSendReply} className="space-y-3">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="font-bold text-ink flex items-center gap-1.5">
-                          <Send className="h-3.5 w-3.5 text-green" /> Quick Reply
-                        </span>
-                        <span className="text-muted text-[11px]">
-                          Sending via:{" "}
-                          <strong className="text-ink">
-                            {activeConversation.senderEmail || connectedEmail || "Connected Gmail"}
-                          </strong>
-                        </span>
                       </div>
+                    );
+                  })}
+                </div>
 
-                      {replySuccess && (
-                        <div className="flex items-center gap-2 rounded-xl bg-green-soft p-3 text-xs text-green-dark border border-sage">
-                          <CheckCircle2 className="h-4 w-4 shrink-0" />
-                          <span>Reply sent successfully and recorded in outbound history.</span>
-                        </div>
-                      )}
-
-                      {replyError && (
-                        <div className="flex items-center gap-2 rounded-xl bg-red-50 p-3 text-xs text-red-700 border border-red-200">
-                          <AlertCircle className="h-4 w-4 shrink-0" />
-                          <span>{replyError}</span>
-                        </div>
-                      )}
-
-                      <div>
-                        <input
-                          type="text"
-                          value={currentReplySubject}
-                          onChange={(e) => setReplySubject(e.target.value)}
-                          placeholder="Subject"
-                          className="input text-xs w-full mb-2 bg-canvas/30"
-                          required
-                        />
-                        <textarea
-                          rows={3}
-                          value={replyBody}
-                          onChange={(e) => setReplyBody(e.target.value)}
-                          placeholder={`Write a direct reply to ${activeConversation.lead.name || activeConversation.recipient}...`}
-                          className="input text-xs w-full resize-none p-3 bg-canvas/30"
-                          required
-                        />
+                {/* Lead AI ICP Context Card */}
+                {selectedEmail.lead && (
+                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-5 text-xs">
+                    <div className="flex items-center justify-between gap-2 text-[#0F3E2E] font-bold mb-2">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="h-4 w-4 text-[#059669]" />
+                        <span className="text-sm">Prospect Research & AI Profile</span>
                       </div>
+                      <span className="rounded-full bg-emerald-100 text-[#0F3E2E] px-2.5 py-0.5 text-[11px] font-bold">
+                        {selectedEmail.lead.matchScore || 90}% ICP Match
+                      </span>
+                    </div>
 
-                      <div className="flex items-center justify-between">
-                        <span className="text-[11px] text-muted">
-                          Uses authenticated Gmail SMTP and records in timeline.
-                        </span>
+                    {selectedEmail.lead.matchReason && (
+                      <p className="text-[#374151] leading-relaxed mb-3">
+                        {selectedEmail.lead.matchReason}
+                      </p>
+                    )}
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-emerald-200/60 text-[11px] text-[#4B5563]">
+                      <div className="flex items-center gap-1.5 truncate">
+                        <Building2 className="h-3.5 w-3.5 text-[#059669] shrink-0" />
+                        <span className="truncate">{selectedEmail.lead.company || "Company"}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 truncate">
+                        <MessageSquare className="h-3.5 w-3.5 text-[#059669] shrink-0" />
+                        <span className="truncate">{selectedEmail.lead.jobTitle || "Role"}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 truncate">
                         <button
-                          type="submit"
-                          disabled={isSendingReply || !replyBody.trim()}
-                          className="btn btn-primary flex items-center gap-1.5 text-xs font-semibold cursor-pointer disabled:opacity-50"
+                          type="button"
+                          onClick={() => handleCopyEmail(selectedEmail.recipientEmail)}
+                          className="hover:text-[#111827] flex items-center gap-1 cursor-pointer truncate"
+                          title="Copy email"
                         >
-                          <Send className="h-3.5 w-3.5" />
-                          <span>{isSendingReply ? "Sending reply..." : "Send Reply"}</span>
+                          <Copy className="h-3.5 w-3.5 text-[#059669] shrink-0" />
+                          <span className="font-mono">{copiedEmail ? "Copied!" : selectedEmail.recipientEmail}</span>
                         </button>
                       </div>
-                    </form>
+                    </div>
                   </div>
-                </>
-              ) : (
-                <div className="flex-1 flex flex-col items-center justify-center p-12 text-center text-muted">
-                  <Mail className="h-10 w-10 text-mist mb-3" />
-                  <p className="text-sm font-semibold text-ink">Select a conversation</p>
-                  <p className="text-xs max-w-sm mt-1 text-muted">
-                    Choose a conversation from the left to view the complete outreach thread and reply directly.
+                )}
+
+                {/* Gmail-Style Quick Reply Drawer */}
+                <div className="pt-2">
+                  {!showReplyBox ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowReplyBox(true)}
+                      className="inline-flex items-center gap-2 rounded-xl bg-[#0F3E2E] text-white px-5 py-2.5 text-xs font-semibold hover:bg-[#165a44] transition-all cursor-pointer shadow-xs"
+                    >
+                      <CornerUpLeft className="h-4 w-4" />
+                      <span>Reply to {selectedEmail.recipientName || selectedEmail.recipientEmail}</span>
+                    </button>
+                  ) : (
+                    <div className="rounded-2xl border border-[#E5E7EB] bg-white p-5 sm:p-6 shadow-sm">
+                      <form onSubmit={handleSendReply} className="space-y-4">
+                        <div className="flex items-center justify-between pb-3 border-b border-[#E5E7EB] text-xs">
+                          <span className="font-bold text-[#111827] flex items-center gap-1.5 text-sm">
+                            <CornerUpLeft className="h-4 w-4 text-[#059669]" /> Reply to{" "}
+                            {selectedEmail.recipientName || selectedEmail.recipientEmail}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setShowReplyBox(false)}
+                            className="text-[#9CA3AF] hover:text-[#111827] cursor-pointer p-1 rounded-lg hover:bg-[#F3F4F6]"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
+
+                        {replySuccess && (
+                          <div className="rounded-xl bg-emerald-50 p-3.5 text-xs text-[#0F3E2E] border border-emerald-200 flex items-center gap-2">
+                            <CheckCircle2 className="h-4 w-4 text-[#059669] shrink-0" />
+                            <span>Reply sent successfully and recorded in timeline.</span>
+                          </div>
+                        )}
+
+                        {replyError && (
+                          <div className="rounded-xl bg-rose-50 p-3.5 text-xs text-rose-700 border border-rose-200 flex items-center gap-2">
+                            <AlertCircle className="h-4 w-4 text-rose-600 shrink-0" />
+                            <span>{replyError}</span>
+                          </div>
+                        )}
+
+                        <div className="space-y-2">
+                          <label className="block text-[11px] font-bold text-[#4B5563] uppercase">Subject</label>
+                          <input
+                            type="text"
+                            value={replySubject}
+                            onChange={(e) => setReplySubject(e.target.value)}
+                            placeholder="Subject"
+                            className="w-full h-9 px-3 text-xs rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] focus:bg-white focus:border-[#059669] focus:ring-1 focus:ring-[#059669] outline-none"
+                            required
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="block text-[11px] font-bold text-[#4B5563] uppercase">Message</label>
+                          <textarea
+                            rows={5}
+                            value={replyBody}
+                            onChange={(e) => setReplyBody(e.target.value)}
+                            placeholder={`Write your reply to ${selectedEmail.recipientName || selectedEmail.recipientEmail}...`}
+                            className="w-full p-3.5 text-xs rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] focus:bg-white focus:border-[#059669] focus:ring-1 focus:ring-[#059669] outline-none resize-none leading-relaxed"
+                            required
+                          />
+                        </div>
+
+                        {/* Quick Response Templates */}
+                        <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                          <span className="text-[10px] font-bold text-[#9CA3AF] uppercase mr-1">Templates:</span>
+                          {[
+                            "Sounds great! Let's schedule a quick call.",
+                            "Following up on my previous note.",
+                            "Thank you for getting back to me.",
+                          ].map((tmpl) => (
+                            <button
+                              key={tmpl}
+                              type="button"
+                              onClick={() => setReplyBody((prev) => (prev ? `${prev}\n\n${tmpl}` : tmpl))}
+                              className="rounded-lg border border-[#E5E7EB] bg-[#F9FAFB] px-2.5 py-1 text-[11px] text-[#4B5563] hover:bg-white hover:text-[#111827] cursor-pointer"
+                            >
+                              + {tmpl}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="flex items-center justify-between pt-2 border-t border-[#F3F4F6]">
+                          <span className="text-[11px] text-[#6B7280]">
+                            Delivers via authenticated Gmail SMTP.
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setShowReplyBox(false)}
+                              className="btn btn-secondary text-xs px-3.5 py-2 cursor-pointer"
+                            >
+                              Discard
+                            </button>
+                            <button
+                              type="submit"
+                              disabled={isSendingReply || !replyBody.trim()}
+                              className="rounded-xl bg-[#0F3E2E] text-white px-4 py-2 text-xs font-semibold hover:bg-[#165a44] transition-all cursor-pointer flex items-center gap-1.5 shadow-xs disabled:opacity-50"
+                            >
+                              <Send className="h-3.5 w-3.5" />
+                              <span>{isSendingReply ? "Sending..." : "Send Reply"}</span>
+                            </button>
+                          </div>
+                        </div>
+                      </form>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* ------------------------------------------------------- */
+            /* CASE 2: EMAIL LIST VIEW (Superhuman / Gmail Table)      */
+            /* ------------------------------------------------------- */
+            <div className="flex flex-col flex-1 min-h-0 overflow-hidden bg-white">
+              {/* Error Alert */}
+              {error && (
+                <div className="m-4 flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800">
+                  <AlertCircle className="h-4 w-4 shrink-0 text-rose-600" />
+                  <span className="flex-1">{error}</span>
+                  <button
+                    type="button"
+                    onClick={() => fetchEmails(true)}
+                    className="font-bold underline hover:text-rose-950 cursor-pointer"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
+
+              {/* Loading State */}
+              {isLoading && (
+                <div className="flex-1 flex flex-col items-center justify-center p-16 text-center">
+                  <RefreshCw className="h-7 w-7 animate-spin text-[#059669]" />
+                  <p className="mt-3 text-xs font-semibold text-[#6B7280]">Synchronizing inbox...</p>
+                </div>
+              )}
+
+              {/* Empty State */}
+              {!isLoading && filteredEmails.length === 0 && (
+                <div className="flex-1 flex flex-col items-center justify-center p-16 text-center">
+                  <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[#F3F4F6] text-[#6B7280] mb-3">
+                    {activeFolder === "inbox" ? (
+                      <InboxIcon className="h-8 w-8 text-[#9CA3AF]" />
+                    ) : (
+                      <Send className="h-8 w-8 text-[#9CA3AF]" />
+                    )}
+                  </div>
+                  <h3 className="text-base font-bold text-[#111827]">
+                    {activeFolder === "inbox" ? "Your inbox is clear" : "No sent outreach yet"}
+                  </h3>
+                  <p className="mx-auto mt-1 max-w-sm text-xs text-[#6B7280]">
+                    {activeFolder === "inbox"
+                      ? "Replies from prospects will automatically land here when campaigns are live."
+                      : "When you launch a campaign or send outreach, all outbound messages are recorded here."}
                   </p>
                 </div>
               )}
+
+              {/* Email Table Header */}
+              {!isLoading && filteredEmails.length > 0 && (
+                <div className="border-b border-[#E5E7EB] bg-[#F9FAFB] px-4 py-2 flex items-center text-[10px] font-bold uppercase tracking-wider text-[#9CA3AF]">
+                  <div className="w-48 sm:w-56 shrink-0">Prospect / Contact</div>
+                  <div className="flex-1 min-w-0">Subject & Outreach Preview</div>
+                  <div className="shrink-0 w-32 text-right">Status & Date</div>
+                </div>
+              )}
+
+              {/* Email List Table Rows */}
+              {!isLoading && filteredEmails.length > 0 && (
+                <div className="divide-y divide-[#F3F4F6] overflow-y-auto flex-1 min-h-0">
+                  {filteredEmails.map((email) => {
+                    const isUnread = email.isUnread;
+                    const contactTitle =
+                      activeFolder === "inbox"
+                        ? email.recipientName || email.senderName || email.recipientEmail
+                        : `To: ${email.recipientName || email.recipientEmail}`;
+                    const avatarGradient = getAvatarGradient(contactTitle);
+                    const avatarInitial = (contactTitle.replace("To: ", "")[0] || "U").toUpperCase();
+
+                    return (
+                      <div
+                        key={email.id}
+                        onClick={() => handleOpenEmail(email)}
+                        className={`group flex items-center gap-3.5 px-4 py-3.5 transition-all cursor-pointer select-none ${
+                          isUnread
+                            ? "bg-white font-bold text-[#111827] hover:bg-emerald-50/40 border-l-4 border-l-[#059669]"
+                            : "bg-white text-[#374151] hover:bg-[#F9FAFB]"
+                        }`}
+                      >
+                        {/* Avatar & Contact Column */}
+                        <div className="w-48 sm:w-56 shrink-0 flex items-center gap-2.5 min-w-0">
+                          <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${avatarGradient} text-white font-bold text-xs shadow-2xs`}>
+                            {avatarInitial}
+                          </div>
+                          <div className="truncate min-w-0">
+                            <span className={`text-xs truncate block ${isUnread ? "font-bold text-[#111827]" : "font-semibold text-[#1F2937]"}`}>
+                              {contactTitle}
+                            </span>
+                            {email.lead?.company && (
+                              <span className="text-[10px] text-[#9CA3AF] truncate block">
+                                {email.lead.company}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Subject & Preview Column */}
+                        <div className="flex-1 min-w-0 flex items-baseline gap-1.5 truncate text-xs">
+                          <span className={`truncate ${isUnread ? "font-bold text-[#111827]" : "font-medium text-[#1F2937]"}`}>
+                            {email.subject || "(No Subject)"}
+                          </span>
+                          <span className="text-[#6B7280] truncate font-normal hidden md:inline">
+                            — {email.preview || "No preview"}
+                          </span>
+                        </div>
+
+                        {/* Status, Campaign & Timestamp Column */}
+                        <div className="shrink-0 flex items-center gap-2">
+                          {email.campaignName && (
+                            <span className="hidden lg:inline-block rounded-md bg-[#F3F4F6] px-2 py-0.5 text-[10px] font-medium text-[#6B7280] truncate max-w-[120px]">
+                              {email.campaignName}
+                            </span>
+                          )}
+
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                              email.status === "Replied"
+                                ? "bg-emerald-50 text-[#059669] border border-emerald-200"
+                                : email.status === "Meeting Booked"
+                                ? "bg-purple-50 text-purple-700 border border-purple-200"
+                                : email.status === "Failed"
+                                ? "bg-rose-50 text-rose-700 border border-rose-200"
+                                : "bg-[#F3F4F6] text-[#4B5563]"
+                            }`}
+                          >
+                            {email.status}
+                          </span>
+
+                          <span className="text-[11px] font-medium text-[#9CA3AF] w-16 text-right">
+                            {formatListDate(email.date)}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          </div>
-        )}
+          )}
+        </main>
       </div>
     </div>
   );

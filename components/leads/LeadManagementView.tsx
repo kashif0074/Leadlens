@@ -42,6 +42,8 @@ interface LeadManagementViewProps {
   onContinue: () => void;
   continueLabel?: string;
   showContinue?: boolean;
+  showFilters?: boolean;
+  readOnly?: boolean;
 }
 
 type SortKey = "match" | "name" | "company";
@@ -154,6 +156,8 @@ export default function LeadManagementView({
   onContinue,
   continueLabel = "Continue",
   showContinue = true,
+  showFilters = true,
+  readOnly = false,
 }: LeadManagementViewProps) {
   // Global search & sort
   const [searchQuery, setSearchQuery] = useState("");
@@ -348,6 +352,11 @@ export default function LeadManagementView({
 
   // Immediate filtering of leads using all active filter dimensions
   const filteredLeads = useMemo(() => {
+    if (readOnly) return leads;
+    if (!showFilters) {
+      return [...leads].sort((a, b) => b.matchScore - a.matchScore);
+    }
+
     const query = searchQuery.trim().toLowerCase();
 
     return leads
@@ -427,6 +436,8 @@ export default function LeadManagementView({
       });
   }, [
     leads,
+    readOnly,
+    showFilters,
     searchQuery,
     selectedIndustries,
     selectedGeographies,
@@ -626,7 +637,7 @@ export default function LeadManagementView({
   return (
     <div className="space-y-4 text-ink">
       {/* Top Search & Filter Bar */}
-      <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center">
+      <div className={`${showFilters ? "flex" : "hidden"} w-full flex-col gap-3 sm:flex-row sm:items-center`}>
         <div className="relative min-w-0 flex-1">
           <Search className="absolute left-4 top-3.5 h-4 w-4 text-muted" />
           <input
@@ -706,7 +717,7 @@ export default function LeadManagementView({
       </div>
 
       {/* Active Filter Chips Bar */}
-      {activeFilters.length > 0 && (
+      {showFilters && activeFilters.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-line bg-white/70 p-3">
           <span className="text-xs font-semibold text-muted">Active filters:</span>
           {activeFilters.map((chip) => (
@@ -740,9 +751,9 @@ export default function LeadManagementView({
         {/* FILTER SIDEBAR                                            */}
         {/* ========================================================= */}
         <aside
-          className={`${
-            filtersOpen ? "block" : "hidden"
-          } w-full shrink-0 space-y-4 rounded-3xl border border-line bg-white p-5 text-xs shadow-xs lg:block lg:w-80`}
+          className={showFilters
+            ? `${filtersOpen ? "block" : "hidden"} w-full shrink-0 space-y-4 rounded-3xl border border-line bg-white p-5 text-xs shadow-xs lg:block lg:w-80`
+            : "hidden"}
         >
           {/* Header */}
           <div className="flex items-center justify-between border-b border-line pb-3">
@@ -982,13 +993,13 @@ export default function LeadManagementView({
                 Showing <strong className="text-ink font-bold">{filteredLeads.length}</strong> of{" "}
                 {leads.length} loaded prospects
               </span>
-              {filteredLeads.length !== leads.length && (
+              {showFilters && filteredLeads.length !== leads.length && (
                 <span className="rounded-full bg-green-soft px-2 py-0.5 text-[10px] font-bold text-green">
                   Filtered
                 </span>
               )}
             </div>
-            {searchQuery && <span>Search: “{searchQuery}”</span>}
+            {showFilters && searchQuery && <span>Search: “{searchQuery}”</span>}
           </div>
 
           {/* Table Container */}
@@ -996,26 +1007,28 @@ export default function LeadManagementView({
             <table className="w-full min-w-[960px] border-collapse text-left text-xs">
               <thead className="border-b border-line bg-mist/60 text-[11px] font-bold uppercase tracking-wider text-muted/90">
                 <tr>
-                  <th className="w-12 py-3.5 pl-4 pr-2 text-center">
-                    <div className="flex items-center justify-center">
-                      <input
-                        type="checkbox"
-                        checked={allFilteredSelected}
-                        onChange={() => {
-                          if (allFilteredSelected) {
-                            onSelectAll(
-                              [...selectedLeadIds].filter((id) => !filteredIds.includes(id)),
-                            );
-                            return;
-                          }
-                          onSelectAll([...new Set([...selectedLeadIds, ...filteredIds])]);
-                        }}
-                        disabled={!filteredLeads.length}
-                        className="h-4 w-4 rounded border-line text-green accent-green cursor-pointer transition-transform hover:scale-105"
-                        aria-label="Select all visible leads"
-                      />
-                    </div>
-                  </th>
+                  {!readOnly && (
+                    <th className="w-12 py-3.5 pl-4 pr-2 text-center">
+                      <div className="flex items-center justify-center">
+                        <input
+                          type="checkbox"
+                          checked={allFilteredSelected}
+                          onChange={() => {
+                            if (allFilteredSelected) {
+                              onSelectAll(
+                                [...selectedLeadIds].filter((id) => !filteredIds.includes(id)),
+                              );
+                              return;
+                            }
+                            onSelectAll([...new Set([...selectedLeadIds, ...filteredIds])]);
+                          }}
+                          disabled={!filteredLeads.length}
+                          className="h-4 w-4 rounded border-line text-green accent-green cursor-pointer transition-transform hover:scale-105"
+                          aria-label="Select all visible leads"
+                        />
+                      </div>
+                    </th>
+                  )}
                   <th className="py-3.5 px-4 font-bold text-ink/80">Person</th>
                   <th className="py-3.5 px-4 font-bold text-ink/80">Role</th>
                   <th className="py-3.5 px-4 font-bold text-ink/80">Company</th>
@@ -1027,36 +1040,34 @@ export default function LeadManagementView({
               </thead>
               <tbody className="divide-y divide-line/60">
                 {filteredLeads.map((lead) => {
-                  const checked = selectedLeadIds.has(lead.id);
+                  const checked = !readOnly && selectedLeadIds.has(lead.id);
                   const initials = getInitials(lead.name);
-                  const linkedinUrl = getLeadLinkedInUrl(lead);
+                  const linkedinUrl = readOnly ? lead.linkedinUrl : getLeadLinkedInUrl(lead);
 
                   return (
                     <tr
                       key={lead.id}
-                      onClick={() => onToggleLead(lead.id)}
-                      onMouseEnter={(e) => handleRowMouseEnter(lead, e)}
-                      onMouseLeave={handleRowMouseLeave}
-                      className={`group relative cursor-pointer transition-all duration-150 ease-out ${
-                        checked
-                          ? "bg-green-soft/40 hover:bg-green-soft/60"
-                          : "bg-white hover:bg-mist/40"
-                      }`}
+                      onClick={readOnly ? undefined : () => onToggleLead(lead.id)}
+                      onMouseEnter={readOnly ? undefined : (e) => handleRowMouseEnter(lead, e)}
+                      onMouseLeave={readOnly ? undefined : handleRowMouseLeave}
+                      className={`group relative transition-colors duration-150 ${readOnly ? "bg-white" : `cursor-pointer ${checked ? "bg-green-soft/40 hover:bg-green-soft/60" : "bg-white hover:bg-mist/40"}`}`}
                     >
-                      <td className="w-12 py-3.5 pl-4 pr-2 text-center relative" onClick={(e) => e.stopPropagation()}>
-                        {checked && (
-                          <div className="absolute left-0 top-2 bottom-2 w-1 rounded-r-full bg-green" />
-                        )}
-                        <div className="flex items-center justify-center">
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => onToggleLead(lead.id)}
-                            className="h-4 w-4 rounded border-line text-green accent-green cursor-pointer transition-transform hover:scale-105"
-                            aria-label={`Select ${lead.name}`}
-                          />
-                        </div>
-                      </td>
+                      {!readOnly && (
+                        <td className="w-12 py-3.5 pl-4 pr-2 text-center relative" onClick={(e) => e.stopPropagation()}>
+                          {checked && (
+                            <div className="absolute left-0 top-2 bottom-2 w-1 rounded-r-full bg-green" />
+                          )}
+                          <div className="flex items-center justify-center">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => onToggleLead(lead.id)}
+                              className="h-4 w-4 rounded border-line text-green accent-green cursor-pointer transition-transform hover:scale-105"
+                              aria-label={`Select ${lead.name}`}
+                            />
+                          </div>
+                        </td>
+                      )}
                       <td className="py-3.5 px-4 whitespace-nowrap">
                         <div className="flex items-center gap-2.5">
                           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-green-soft to-sage border border-green/20 font-bold text-xs text-green-dark shadow-2xs group-hover:border-green/40 group-hover:scale-105 transition-all">
@@ -1089,19 +1100,23 @@ export default function LeadManagementView({
                         </span>
                       </td>
                       <td className="py-3.5 px-4 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                        <a
-                          href={linkedinUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-[#0a66c2]/25 bg-[#0a66c2]/5 px-2.5 py-1 text-[11px] font-semibold text-[#0a66c2] hover:border-[#0a66c2]/50 hover:bg-[#0a66c2]/10 transition-colors shadow-2xs"
-                          title={`View ${lead.name} on LinkedIn`}
-                        >
-                          <svg className="h-3.5 w-3.5 fill-[#0a66c2] shrink-0" viewBox="0 0 24 24">
-                            <path d="M19 3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14m-.5 15.5v-5.3a3.26 3.26 0 0 0-3.26-3.26c-.85 0-1.84.52-2.28 1.3v-1.11h-2.79v8.37h2.79v-4.93c0-.77.62-1.4 1.39-1.4a1.4 1.4 0 0 1 1.4 1.4v4.93h2.75M6.46 10.9v8.37H9.25V10.9H6.46M7.86 6.54a1.64 1.64 0 1 0 0 3.27 1.64 1.64 0 0 0 0-3.27Z" />
-                          </svg>
-                          <span>LinkedIn</span>
-                          <ExternalLink className="h-2.5 w-2.5 opacity-60 text-muted" />
-                        </a>
+                        {linkedinUrl ? (
+                          <a
+                            href={linkedinUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-[#0a66c2]/25 bg-[#0a66c2]/5 px-2.5 py-1 text-[11px] font-semibold text-[#0a66c2] hover:border-[#0a66c2]/50 hover:bg-[#0a66c2]/10 transition-colors shadow-2xs"
+                            title={`View ${lead.name} on LinkedIn`}
+                          >
+                            <svg className="h-3.5 w-3.5 fill-[#0a66c2] shrink-0" viewBox="0 0 24 24">
+                              <path d="M19 3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14m-.5 15.5v-5.3a3.26 3.26 0 0 0-3.26-3.26c-.85 0-1.84.52-2.28 1.3v-1.11h-2.79v8.37h2.79v-4.93c0-.77.62-1.4 1.39-1.4a1.4 1.4 0 0 1 1.4 1.4v4.93h2.75M6.46 10.9v8.37H9.25V10.9H6.46M7.86 6.54a1.64 1.64 0 1 0 0 3.27 1.64 1.64 0 0 0 0-3.27Z" />
+                            </svg>
+                            <span>LinkedIn</span>
+                            <ExternalLink className="h-2.5 w-2.5 opacity-60 text-muted" />
+                          </a>
+                        ) : (
+                          <span className="text-xs text-muted">—</span>
+                        )}
                       </td>
                       <td className="py-3.5 px-4 whitespace-nowrap">
                         <span className="inline-flex items-center gap-1.5 text-xs text-muted font-medium bg-white border border-line/80 px-2.5 py-1 rounded-full shadow-2xs">
@@ -1128,7 +1143,7 @@ export default function LeadManagementView({
               {leads.length === 0
                 ? "No leads are loaded yet. Generate a campaign brief to populate this list."
                 : "No leads match the current filters and search criteria."}
-              {leads.length > 0 && (
+              {showFilters && leads.length > 0 && (
                 <div className="mt-4">
                   <button
                     type="button"
@@ -1145,57 +1160,76 @@ export default function LeadManagementView({
 
           {/* Bottom Table Actions */}
           <div className="flex flex-col justify-between gap-4 border-t border-line bg-canvas p-4 sm:flex-row sm:items-center sm:p-5">
-            <div>
-              <div className="text-sm font-bold text-ink">
-                <strong className="text-green font-extrabold">{selectedLeadIds.size}</strong> of{" "}
-                {leads.length} leads selected
-              </div>
-              <p className="text-[11px] text-muted">
-                Selected prospects will receive personalized outreach sequences in this campaign.
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  if (onAddToConnect) {
-                    onAddToConnect();
-                  } else {
-                    onSelectAll([...new Set([...selectedLeadIds, ...filteredIds])]);
-                  }
-                }}
-                className="btn btn-secondary text-xs cursor-pointer"
-              >
-                Add to Connect
-              </button>
-              <button
-                type="button"
-                onClick={() => onSelectAll(leads.map((lead) => lead.id))}
-                className="btn btn-secondary text-xs cursor-pointer"
-              >
-                Select All
-              </button>
-              {onClearAll && (
-                <button
-                  type="button"
-                  onClick={onClearAll}
-                  className="btn btn-secondary text-xs cursor-pointer"
-                >
-                  Clear Selection
-                </button>
-              )}
-              {showContinue && (
-                <button
-                  type="button"
-                  onClick={onContinue}
-                  disabled={selectedLeadIds.size === 0}
-                  className="btn btn-primary text-xs cursor-pointer flex items-center gap-2"
-                >
-                  <span>{continueLabel}</span>
-                  <ArrowRight className="h-4 w-4 text-gold" />
-                </button>
-              )}
-            </div>
+            {readOnly ? (
+              <>
+                <p className="text-sm font-medium text-muted">{leads.length} imported records</p>
+                {showContinue && (
+                  <button
+                    type="button"
+                    onClick={onContinue}
+                    disabled={selectedLeadIds.size === 0}
+                    className="btn btn-primary text-xs cursor-pointer flex items-center gap-2"
+                  >
+                    <span>{continueLabel}</span>
+                    <ArrowRight className="h-4 w-4 text-gold" />
+                  </button>
+                )}
+              </>
+            ) : (
+              <>
+                <div>
+                  <div className="text-sm font-bold text-ink">
+                    <strong className="text-green font-extrabold">{selectedLeadIds.size}</strong> of{" "}
+                    {leads.length} leads selected
+                  </div>
+                  <p className="text-[11px] text-muted">
+                    Selected prospects will receive personalized outreach sequences in this campaign.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onAddToConnect) {
+                        onAddToConnect();
+                      } else {
+                        onSelectAll([...new Set([...selectedLeadIds, ...filteredIds])]);
+                      }
+                    }}
+                    className="btn btn-secondary text-xs cursor-pointer"
+                  >
+                    Add to Connect
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onSelectAll(leads.map((lead) => lead.id))}
+                    className="btn btn-secondary text-xs cursor-pointer"
+                  >
+                    Select All
+                  </button>
+                  {onClearAll && (
+                    <button
+                      type="button"
+                      onClick={onClearAll}
+                      className="btn btn-secondary text-xs cursor-pointer"
+                    >
+                      Clear Selection
+                    </button>
+                  )}
+                  {showContinue && (
+                    <button
+                      type="button"
+                      onClick={onContinue}
+                      disabled={selectedLeadIds.size === 0}
+                      className="btn btn-primary text-xs cursor-pointer flex items-center gap-2"
+                    >
+                      <span>{continueLabel}</span>
+                      <ArrowRight className="h-4 w-4 text-gold" />
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
