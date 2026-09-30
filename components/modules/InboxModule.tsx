@@ -146,10 +146,12 @@ export default function InboxModule({
 
     try {
       const res = await fetch("/api/inbox", { cache: "no-store" });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(`Failed to load mail (HTTP ${res.status})`);
+        throw new Error(
+          typeof data.error === "string" ? data.error : `Failed to load mail (HTTP ${res.status})`,
+        );
       }
-      const data = await res.json();
       setInboxItems(data.inboxItems || []);
       setSentItems(data.sentItems || []);
       if (data.stats) setStats(data.stats);
@@ -165,34 +167,15 @@ export default function InboxModule({
   }, []);
 
   useEffect(() => {
-    let isMounted = true;
-    const load = async () => {
-      try {
-        const res = await fetch("/api/inbox", { cache: "no-store" });
-        if (!res.ok) throw new Error(`Failed to load mail (HTTP ${res.status})`);
-        const data = await res.json();
-        if (isMounted) {
-          setInboxItems(data.inboxItems || []);
-          setSentItems(data.sentItems || []);
-          if (data.stats) setStats(data.stats);
-          if (data.connectedAccounts) setConnectedAccounts(data.connectedAccounts);
-          if (data.currentUser) setCurrentUser(data.currentUser);
-        }
-      } catch (err) {
-        if (isMounted) {
-          setError(err instanceof Error ? err.message : "Unable to load mail.");
-        }
-      } finally {
-        if (isMounted) {
-          setIsLoading(false);
-        }
-      }
-    };
-    load();
+    const initialFetch = window.setTimeout(() => void fetchEmails(), 0);
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") void fetchEmails();
+    }, 30_000);
     return () => {
-      isMounted = false;
+      window.clearTimeout(initialFetch);
+      window.clearInterval(interval);
     };
-  }, []);
+  }, [fetchEmails]);
 
   const handleBackToList = useCallback(() => {
     setSelectedEmailId(null);

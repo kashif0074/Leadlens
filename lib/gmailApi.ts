@@ -3,7 +3,6 @@ import { db } from "@/lib/db";
 import { decrypt, encrypt } from "@/lib/crypto";
 import {
   createGoogleOAuthClient,
-  getGoogleOAuthCredentials,
 } from "@/lib/googleOAuth";
 
 type SendGmailParams = {
@@ -92,13 +91,9 @@ export async function sendGmailMessage({
     account.tokenExpiresAt!.getTime() > Date.now() + 60_000;
 
   if (!tokenIsFresh) {
-    const { clientId, clientSecret } = getGoogleOAuthCredentials();
-
     const oauth = createGoogleOAuthClient();
 
     oauth.setCredentials({
-      client_id: clientId,
-      client_secret: clientSecret,
       refresh_token: decrypt(account.refreshToken),
     });
 
@@ -200,6 +195,7 @@ export async function sendGmailMessage({
 
     return {
       messageId: result.data.id || undefined,
+      threadId: result.data.threadId || undefined,
     };
   } catch (error) {
     console.error("[Gmail API] Send failed:", error);

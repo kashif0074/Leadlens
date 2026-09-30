@@ -681,6 +681,7 @@ Regards,`;
           data: {
             status: "Sent",
             messageId: sendResult.messageId,
+            gmailThreadId: sendResult.threadId,
             sentAt: new Date(),
             error: null,
           },

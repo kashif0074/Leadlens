@@ -3,12 +3,17 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/auth";
 import { db } from "@/lib/db";
 import { getGmailSenderCredentials } from "@/lib/gmailSender";
+import { syncGmailInbox } from "@/lib/gmailInboxSync";
 import { sendEmail, type SmtpCredentials } from "@/workers/processors/emailWorker";
 import type { Lead } from "@/types";
 
 export const runtime = "nodejs";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function previewText(value: string | null | undefined) {
+  return (value ?? "").slice(0, 140).replace(/[\r\n]+/g, " ");
+}
 
 export type InboxMessage = {
   id: string;
@@ -73,6 +78,12 @@ export async function GET() {
 
     const userId = session.user.id;
 
+    try {
+      await syncGmailInbox(userId);
+    } catch (syncError) {
+      console.error("[API /api/inbox] Gmail inbox sync failed:", syncError);
+    }
+
     // 1. Fetch campaigns belonging to the user
     const campaigns = await db.campaign.findMany({
       where: { userId },
@@ -80,6 +91,7 @@ export async function GET() {
         id: true,
         name: true,
         connectedEmail: true,
+        emailAccountId: true,
         provider: true,
         status: true,
         selectedLeads: true,
@@ -101,6 +113,16 @@ export async function GET() {
             },
           },
           orderBy: { createdAt: "asc" },
+        })
+      : [];
+
+    const inboundEmails = campaignIds.length
+      ? await db.inboundEmail.findMany({
+          where: { userId, campaignId: { in: campaignIds } },
+          include: {
+            campaign: { select: { id: true, name: true } },
+          },
+          orderBy: { receivedAt: "asc" },
         })
       : [];
 
@@ -181,7 +203,9 @@ export async function GET() {
     for (const delivery of deliveries) {
       const recipientEmail = delivery.recipient.toLowerCase().trim();
       const leadInfo = leadByIdMap.get(delivery.leadId) || leadByEmailMap.get(recipientEmail);
-      const convKey = recipientEmail || delivery.leadId;
+      const convKey = delivery.gmailThreadId
+        ? `${delivery.campaignId}:${delivery.gmailThreadId}`
+        : `${delivery.campaignId}:${recipientEmail || delivery.leadId}`;
 
       const leadDisplayName =
         leadInfo?.name ||
@@ -220,7 +244,7 @@ export async function GET() {
           recipientEmail: delivery.recipient,
           recipientName: leadDisplayName,
           subject: delivery.subject,
-          preview: delivery.body.slice(0, 140).replace(/[\r\n]+/g, " "),
+          preview: previewText(delivery.body),
           body: delivery.body,
           status: delivery.status,
           date: message.sentAt || message.createdAt,
@@ -253,7 +277,7 @@ export async function GET() {
         if (new Date(msgDate) > new Date(existing.date)) {
           existing.date = msgDate;
           existing.subject = delivery.subject;
-          existing.preview = delivery.body.slice(0, 140).replace(/[\r\n]+/g, " ");
+          existing.preview = previewText(delivery.body);
           existing.body = delivery.body;
           existing.status = delivery.status;
           if (isReplied) {
@@ -266,7 +290,7 @@ export async function GET() {
       // Also create an individual sent item record
       sentItems.push({
         id: delivery.id,
-        threadId: convKey,
+        threadId: delivery.gmailThreadId || convKey,
         folder: "sent",
         isUnread: false,
         senderEmail: message.senderEmail,
@@ -274,7 +298,7 @@ export async function GET() {
         recipientEmail: delivery.recipient,
         recipientName: leadDisplayName,
         subject: delivery.subject,
-        preview: delivery.body.slice(0, 140).replace(/[\r\n]+/g, " "),
+        preview: previewText(delivery.body),
         body: delivery.body,
         status: delivery.status,
         date: message.sentAt || message.createdAt,
@@ -299,6 +323,61 @@ export async function GET() {
         },
         messages: [message],
       });
+    }
+
+    for (const inbound of inboundEmails) {
+      const convKey = `${inbound.campaignId}:${inbound.gmailThreadId}`;
+      const thread = conversationMap.get(convKey);
+      if (!thread) continue;
+
+      const leadInfo = leadByIdMap.get(inbound.leadId) || leadByEmailMap.get(inbound.senderEmail.toLowerCase());
+      const senderName = inbound.senderName || leadInfo?.name || inbound.senderEmail.split("@")[0];
+      const receivedAt = inbound.receivedAt.toISOString();
+      const message: InboxMessage = {
+        id: inbound.id,
+        direction: "inbound",
+        senderEmail: inbound.senderEmail,
+        senderName,
+        recipient: inbound.recipientEmail,
+        recipientName: userDisplayName,
+        subject: inbound.subject,
+        body: inbound.body,
+        status: "Replied",
+        messageId: inbound.gmailMessageId,
+        sentAt: receivedAt,
+        createdAt: receivedAt,
+      };
+
+      thread.messages.push(message);
+      thread.messages.sort((a, b) => new Date(a.sentAt || a.createdAt).getTime() - new Date(b.sentAt || b.createdAt).getTime());
+      thread.folder = "inbox";
+      thread.isUnread = true;
+      thread.senderEmail = inbound.senderEmail;
+      thread.senderName = senderName;
+      thread.recipientEmail = inbound.recipientEmail;
+      thread.recipientName = userDisplayName;
+      thread.subject = inbound.subject;
+      thread.preview = previewText(inbound.body);
+      thread.body = inbound.body;
+      thread.status = "Replied";
+      thread.date = receivedAt;
+      thread.campaignName = inbound.campaign.name;
+      thread.lead = {
+        id: leadInfo?.id || inbound.leadId,
+        name: leadInfo?.name || senderName,
+        firstName: leadInfo?.firstName,
+        lastName: leadInfo?.lastName,
+        jobTitle: leadInfo?.jobTitle || "Contact",
+        role: leadInfo?.role,
+        company: leadInfo?.company || "Organization",
+        industry: leadInfo?.industry,
+        location: leadInfo?.location,
+        email: inbound.senderEmail,
+        status: "Replied",
+        matchScore: leadInfo?.matchScore || 90,
+        matchReason: leadInfo?.matchReason || "Replied to a campaign email",
+        verificationTag: leadInfo?.verificationTag || "Email verified",
+      };
     }
 
     // Populate Inbox items from threads with replies or inbound messages

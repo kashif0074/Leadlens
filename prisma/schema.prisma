@@ -21,6 +21,7 @@ model User {
   sessions          Session[]
   emailAccounts     EmailAccount[]
   emailSuppressions EmailSuppression[]
+  inboundEmails     InboundEmail[]
 
   @@map("users")
 }
@@ -111,27 +112,30 @@ model Campaign {
   emailAccount       EmailAccount?   @relation(fields: [emailAccountId], references: [id], onDelete: SetNull)
   leads              Lead[]
   emailDeliveries    EmailDelivery[]
+  inboundEmails      InboundEmail[]
 
   @@index([userId])
   @@map("campaigns")
 }
 
 model EmailDelivery {
-  id          String    @id @default(cuid())
-  campaignId  String    @map("campaign_id")
-  leadId      String    @map("lead_id")
-  step        Int
-  recipient   String
-  senderEmail String?   @map("sender_email")
-  subject     String    @db.Text
-  body        String    @db.Text
-  status      String    @default("Sending")
-  messageId   String?   @map("message_id")
-  error       String?   @db.Text
-  sentAt      DateTime? @map("sent_at")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
-  campaign    Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  id            String         @id @default(cuid())
+  campaignId    String         @map("campaign_id")
+  leadId        String         @map("lead_id")
+  step          Int
+  recipient     String
+  senderEmail   String?        @map("sender_email")
+  subject       String         @db.Text
+  body          String         @db.Text
+  status        String         @default("Sending")
+  messageId     String?        @map("message_id")
+  gmailThreadId String?        @map("gmail_thread_id")
+  error         String?        @db.Text
+  sentAt        DateTime?      @map("sent_at")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+  campaign      Campaign       @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  inboundEmails InboundEmail[]
 
   @@unique([campaignId, leadId, step])
   @@index([campaignId, status])
@@ -226,21 +230,51 @@ model JobResult {
 }
 
 model EmailAccount {
-  id             String    @id @default(cuid())
-  userId         String
-  email          String
-  displayName    String    @default("") @map("display_name")
-  sendLockUntil  DateTime? @map("send_lock_until")
-  accessToken    String?   @map("access_token") @db.Text
-  refreshToken   String?   @map("refresh_token") @db.Text
-  tokenExpiresAt DateTime? @map("token_expires_at")
-  status         String    @default("reconnect_required")
-  createdAt      DateTime  @default(now())
+  id              String    @id @default(cuid())
+  userId          String
+  email           String
+  displayName     String    @default("") @map("display_name")
+  sendLockUntil   DateTime? @map("send_lock_until")
+  accessToken     String?   @map("access_token") @db.Text
+  refreshToken    String?   @map("refresh_token") @db.Text
+  tokenExpiresAt  DateTime? @map("token_expires_at")
+  gmailHistoryId  String?   @map("gmail_history_id")
+  lastInboxSyncAt DateTime? @map("last_inbox_sync_at")
+  status          String    @default("reconnect_required")
+  createdAt       DateTime  @default(now())
 
-  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  campaigns Campaign[]
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  campaigns     Campaign[]
+  inboundEmails InboundEmail[]
 
   @@unique([userId, email])
+}
+
+model InboundEmail {
+  id             String        @id @default(cuid())
+  userId         String        @map("user_id")
+  emailAccountId String        @map("email_account_id")
+  campaignId     String        @map("campaign_id")
+  deliveryId     String        @map("delivery_id")
+  leadId         String        @map("lead_id")
+  gmailMessageId String        @map("gmail_message_id")
+  gmailThreadId  String        @map("gmail_thread_id")
+  senderEmail    String        @map("sender_email")
+  senderName     String?       @map("sender_name")
+  recipientEmail String        @map("recipient_email")
+  subject        String        @db.Text
+  body           String        @db.Text
+  receivedAt     DateTime      @map("received_at")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emailAccount   EmailAccount  @relation(fields: [emailAccountId], references: [id], onDelete: Cascade)
+  campaign       Campaign      @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  delivery       EmailDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+
+  @@unique([emailAccountId, gmailMessageId])
+  @@index([userId, receivedAt])
+  @@index([campaignId, gmailThreadId])
+  @@map("inbound_emails")
 }
 
 model EmailSuppression {

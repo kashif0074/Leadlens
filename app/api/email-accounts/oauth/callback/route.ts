@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { authOptions } from "@/auth";
 import { encrypt } from "@/lib/crypto";
 import { db } from "@/lib/db";
-import { createGoogleOAuthClient, GMAIL_OAUTH_STATE_COOKIE, GMAIL_SEND_SCOPE, gmailOAuthCallbackUrl, verifyGmailOAuthState } from "@/lib/googleOAuth";
+import { createGoogleOAuthClient, GMAIL_OAUTH_STATE_COOKIE, GMAIL_READONLY_SCOPE, GMAIL_SEND_SCOPE, gmailOAuthCallbackUrl, verifyGmailOAuthState } from "@/lib/googleOAuth";
 import { google } from "googleapis";
 
 export const runtime = "nodejs";
@@ -55,11 +55,13 @@ export async function GET(request: NextRequest) {
     const oauth = createGoogleOAuthClient(gmailOAuthCallbackUrl(origin));
     const { tokens } = await oauth.getToken(code);
     if (!tokens.access_token) throw new Error("Google did not provide an access token.");
-    if (!tokens.scope?.split(/\s+/).includes(GMAIL_SEND_SCOPE)) {
-      throw new Error("Gmail send permission was not granted. Reconnect and approve the Gmail access request.");
+    const grantedScopes = tokens.scope?.split(/\s+/) ?? [];
+    if (!grantedScopes.includes(GMAIL_SEND_SCOPE) || !grantedScopes.includes(GMAIL_READONLY_SCOPE)) {
+      throw new Error("Gmail send and inbox read permissions were not granted. Reconnect and approve the Gmail access request.");
     }
     oauth.setCredentials(tokens);
     const userInfo = await google.oauth2({ version: "v2", auth: oauth }).userinfo.get();
+    const gmailProfile = await google.gmail({ version: "v1", auth: oauth }).users.getProfile({ userId: "me" });
     const email = userInfo.data.email?.trim().toLowerCase();
     if (!email || !userInfo.data.verified_email) throw new Error("Google did not verify the selected Gmail address.");
 
@@ -81,6 +83,7 @@ export async function GET(request: NextRequest) {
         accessToken: encrypt(tokens.access_token),
         refreshToken,
         tokenExpiresAt: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
+        gmailHistoryId: gmailProfile.data.historyId ?? null,
         status: "connected",
       },
       update: {

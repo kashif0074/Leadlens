@@ -32,8 +32,11 @@ ${NEXTAUTH_URL}/api/email-accounts/oauth/callback
 
 The sender account is saved against the authenticated LeadLens user and linked
 to the campaign. Gmail OAuth access and refresh tokens are encrypted and remain
-server-side. Revoked or expired access requires the user to reconnect; sending
-never falls back to the Google sign-in address or a global SMTP mailbox.
+server-side. The explicit sender consent also grants read-only access so Gmail
+History can sync replies to campaign messages while the Inbox is open (the
+Inbox refreshes every 30 seconds). Revoked or expired access requires the user
+to reconnect; sending never falls back to the Google sign-in address or a global
+SMTP mailbox.
 
 Set `ENCRYPTION_KEY` in `.env` to a randomly generated 32-byte hexadecimal key:
 

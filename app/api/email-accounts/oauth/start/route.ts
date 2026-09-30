@@ -2,7 +2,7 @@ import { getServerSession } from "next-auth";
 import { NextRequest, NextResponse } from "next/server";
 import { authOptions } from "@/auth";
 import { db } from "@/lib/db";
-import { createGoogleOAuthClient, GMAIL_OAUTH_STATE_COOKIE, GMAIL_SEND_SCOPE, gmailOAuthCallbackUrl, signGmailOAuthState } from "@/lib/googleOAuth";
+import { createGoogleOAuthClient, GMAIL_OAUTH_STATE_COOKIE, GMAIL_READONLY_SCOPE, GMAIL_SEND_SCOPE, gmailOAuthCallbackUrl, signGmailOAuthState } from "@/lib/googleOAuth";
 
 export const runtime = "nodejs";
 
@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
       access_type: "offline",
       include_granted_scopes: true,
       prompt: "consent select_account",
-      scope: ["openid", "email", "profile", GMAIL_SEND_SCOPE],
+      scope: ["openid", "email", "profile", GMAIL_SEND_SCOPE, GMAIL_READONLY_SCOPE],
       state,
     });
     const response = NextResponse.redirect(authorizationUrl);
