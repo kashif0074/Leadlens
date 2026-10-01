@@ -2,19 +2,28 @@
 
 import { useState } from "react";
 import { ArrowLeft, CheckCircle2, Pencil } from "lucide-react";
+import FollowUpScheduleControl, { type FollowUpSequenceItem } from "@/components/common/FollowUpScheduleControl";
 import type { Lead } from "../../types";
 
-type SequenceItem = {
+type SequenceItem = FollowUpSequenceItem & {
   label: string;
   subject: string;
   body: string;
-  schedule: string;
+  schedule?: string;
 };
 
 interface EmailSequenceModuleProps {
   leads: Lead[];
   provider?: string;
-  sequence?: Array<{ step?: number; delayDays?: number; subject: string; body: string }>;
+  sequence?: Array<{
+    step?: number;
+    delayDays?: number;
+    intervalDays?: number;
+    scheduleMode?: "default" | "custom";
+    customSendAt?: string;
+    subject: string;
+    body: string;
+  }>;
   onBack: () => void;
   onContinue: () => void;
 }
@@ -30,13 +39,13 @@ const fallbackSequence: SequenceItem[] = [
     label: "Follow-up 1",
     subject: "Re: Quick question regarding your pipeline",
     body: "Hi {{first_name}},\n\nFollowing up in case this is relevant to your current growth plans. Happy to share a short example of the workflow.",
-    schedule: "3 days after First Email",
+    schedule: "1 week (7 days) after First Email",
   },
   {
     label: "Follow-up 2",
     subject: "A practical idea for {{company}}",
     body: "One practical idea: start with the accounts already showing an expansion signal, then keep the cadence considerate and measurable.",
-    schedule: "5 days after Follow-up 1",
+    schedule: "3 days after Follow-up 1",
   },
 ];
 
@@ -50,10 +59,20 @@ export default function EmailSequenceModule({
   const [sequence, setSequence] = useState<SequenceItem[]>(() => {
     if (customSequence && customSequence.length > 0) {
       return customSequence.map((item, index) => ({
+        ...item,
         label: index === 0 ? "First Email" : `Follow-up ${index}`,
         subject: item.subject,
         body: item.body,
-        schedule: index === 0 ? "Send immediately after launch" : `${item.delayDays || (index === 1 ? 3 : 5)} days after previous email`,
+        delayDays: item.delayDays ?? (index === 0 ? 0 : index === 1 ? 7 : 10),
+        intervalDays: item.intervalDays ?? (index === 0 ? 0 : index === 1 ? 7 : 3),
+        scheduleMode: item.scheduleMode ?? "default",
+        customSendAt: item.customSendAt,
+        schedule:
+          index === 0
+            ? "Send immediately after launch"
+            : index === 1
+              ? `${item.delayDays || 7} days (1 week) after First Email`
+              : `${item.delayDays ? (item.delayDays > (customSequence[1]?.delayDays || 7) ? item.delayDays - (customSequence[1]?.delayDays || 7) : 3) : 3} days after Follow-up 1`,
       }));
     }
     return fallbackSequence;
@@ -124,6 +143,15 @@ export default function EmailSequenceModule({
                 </div>
               </div>
             )}
+            {/* Follow-up schedule customization control for Step 2 and Step 3 */}
+            {(index === 1 || index === 2) && (
+              <FollowUpScheduleControl
+                stepIndex={index as 1 | 2}
+                sequence={sequence}
+                onUpdateSequence={(updated) => setSequence(updated as SequenceItem[])}
+              />
+            )}
+
             <div className="mt-4 flex items-center gap-2 border-t border-line pt-3 text-xs text-muted">
               <CheckCircle2 className="h-4 w-4 text-green" /> {saved ? "Sequence saved as draft" : "Draft · not sent"}
             </div>

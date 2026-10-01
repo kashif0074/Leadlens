@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import Image from "next/image";
-import { useSession, signOut } from "next-auth/react";
+import { useSession } from "next-auth/react";
 import { AppModule } from "../../types";
 import LeadLensLogo from "../common/LeadLensLogo";
 import {
@@ -13,18 +13,14 @@ import {
   CalendarCheck,
   TrendingUp,
   SlidersHorizontal,
-  ChevronLeft,
-  ChevronRight,
   Menu,
   X,
   House,
-  LogOut,
 } from "lucide-react";
 
 interface AppShellProps {
   currentModule: AppModule;
   onSelectModule: (module: AppModule) => void;
-  onOpenPrompt: () => void;
   onSwitchToLanding: () => void;
   hideSidebar?: boolean;
   workspaceStatus?: string;
@@ -64,7 +60,6 @@ function moduleTitle(currentModule: AppModule) {
 export default function AppShell({
   currentModule,
   onSelectModule,
-  onOpenPrompt,
   onSwitchToLanding,
   hideSidebar = false,
   workspaceStatus,
@@ -88,10 +83,6 @@ export default function AppShell({
     }
   };
 
-  const handleSignOut = async () => {
-    await signOut({ callbackUrl: "/" });
-  };
-
   const userName = session?.user?.name || session?.user?.email || "Workspace User";
   const userEmail = session?.user?.email || "";
   const userImage = session?.user?.image;
@@ -108,20 +99,7 @@ export default function AppShell({
           <div className="space-y-5">
             <div className={`flex items-center ${isCollapsed ? "justify-center" : "justify-between"} gap-2 pt-1`}>
               {!isCollapsed && <LeadLensLogo variant="nav" />}
-              {isCollapsed && <LeadLensLogo variant="sm" />}
-              <button
-                type="button"
-                onClick={() => setIsCollapsed((value) => !value)}
-                className="icon-btn cursor-pointer"
-                title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-                aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-              >
-                {isCollapsed ? (
-                  <ChevronRight className="h-4 w-4 text-green" />
-                ) : (
-                  <ChevronLeft className="h-4 w-4 text-green" />
-                )}
-              </button>
+              {isCollapsed && <LeadLensLogo variant="sm" className="h-10 w-10" />}
             </div>
 
             {!isCollapsed && workspaceStatus && (
@@ -195,17 +173,6 @@ export default function AppShell({
               {isCollapsed && <House className="h-4 w-4" />}
             </button>
 
-            <button
-              type="button"
-              onClick={handleSignOut}
-              className={`flex w-full items-center rounded-xl py-2 text-xs font-semibold text-muted hover:bg-red-50 hover:text-red-600 cursor-pointer ${
-                isCollapsed ? "justify-center" : "gap-2 px-3"
-              }`}
-              title="Sign out"
-            >
-              <LogOut className="h-3.5 w-3.5 shrink-0" />
-              {!isCollapsed && <span>Sign out</span>}
-            </button>
           </div>
         </aside>
       )}
@@ -277,14 +244,6 @@ export default function AppShell({
                 <span>Back to landing</span>
               </button>
 
-              <button
-                type="button"
-                onClick={handleSignOut}
-                className="flex w-full items-center gap-2 rounded-xl py-2 px-1 text-xs font-semibold text-red-600 hover:bg-red-50 cursor-pointer"
-              >
-                <LogOut className="h-4 w-4" />
-                <span>Sign out</span>
-              </button>
             </div>
           </aside>
         </div>
@@ -329,13 +288,6 @@ export default function AppShell({
                 <span>Dashboard</span>
               </button>
             )}
-            <button
-              type="button"
-              onClick={onOpenPrompt}
-              className="rounded-full bg-green px-4 py-2 text-xs font-semibold text-white hover:bg-green-dark cursor-pointer"
-            >
-              New Campaign
-            </button>
           </div>
         </header>
 

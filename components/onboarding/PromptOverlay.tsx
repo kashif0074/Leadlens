@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowRight, Sparkles, X } from "lucide-react";
 import LeadLensLogo from "../common/LeadLensLogo";
 
@@ -16,9 +16,39 @@ export default function PromptOverlay({
   onPromptSubmitted,
 }: PromptOverlayProps) {
   const [isGenerating, setIsGenerating] = useState(false);
-  const [promptText, setPromptText] = useState(
-    "We help boutique recruitment firms book more qualified client conversations with enterprise tech leaders...",
-  );
+  const [promptText, setPromptText] = useState("");
+  const [animatedPlaceholder, setAnimatedPlaceholder] = useState("");
+
+  useEffect(() => {
+    if (!isOpen || promptText) return;
+
+    const placeholderText = "Describe the campaign you want to create...";
+    let characterCount = 0;
+    let isDeleting = false;
+    let timeoutId: number;
+
+    const animatePlaceholder = () => {
+      characterCount += isDeleting ? -1 : 1;
+      setAnimatedPlaceholder(placeholderText.slice(0, characterCount));
+
+      if (characterCount === placeholderText.length) {
+        isDeleting = true;
+        timeoutId = window.setTimeout(animatePlaceholder, 1100);
+        return;
+      }
+
+      if (characterCount === 0) {
+        isDeleting = false;
+        timeoutId = window.setTimeout(animatePlaceholder, 450);
+        return;
+      }
+
+      timeoutId = window.setTimeout(animatePlaceholder, isDeleting ? 32 : 55);
+    };
+
+    timeoutId = window.setTimeout(animatePlaceholder, 250);
+    return () => window.clearTimeout(timeoutId);
+  }, [isOpen, promptText]);
 
   if (!isOpen) return null;
 
@@ -85,19 +115,19 @@ export default function PromptOverlay({
                   <textarea
                     rows={6}
                     value={promptText}
-                    onChange={(event) => setPromptText(event.target.value)}
-                    placeholder="We help boutique recruitment firms book more qualified client conversations..."
-                    className="mt-2 w-full resize-none rounded-2xl border border-[#D8E2E1] p-4 text-sm leading-relaxed text-[#1B2632] shadow-2xs focus:border-[#045C5C] focus:outline-none focus:ring-1 focus:ring-[#045C5C] sm:text-base"
+                    onChange={(event) => {
+                      setPromptText(event.target.value);
+                      setAnimatedPlaceholder("");
+                    }}
+                    placeholder={animatedPlaceholder}
+                    className="mt-2 w-full resize-none rounded-2xl border border-[#D8E2E1] p-4 text-sm font-normal leading-relaxed text-[#1B2632] placeholder:text-[#7A878A] shadow-2xs focus:border-[#045C5C] focus:outline-none focus:ring-1 focus:ring-[#045C5C] sm:text-base"
                     required
                   />
                 </label>
                 <div className="flex flex-col justify-between gap-4 pt-2 sm:flex-row sm:items-center">
-                  <span className="text-xs text-[#5A6672]">
-                    Your brief carries forward into the lead and campaign workflow.
-                  </span>
                   <button
                     type="submit"
-                    className="flex items-center justify-center gap-2 self-end whitespace-nowrap rounded-full bg-[#045C5C] px-7 py-3 font-semibold text-sm text-white transition-colors hover:bg-[#034A4A] sm:self-auto"
+                    className="ml-auto flex items-center justify-center gap-2 self-end whitespace-nowrap rounded-full bg-[#045C5C] px-7 py-3 font-semibold text-sm text-white transition-colors hover:bg-[#034A4A] sm:self-auto"
                   >
                     Generate Matching Leads
                     <ArrowRight className="h-4 w-4 text-[#BC9747]" />

@@ -327,12 +327,20 @@ export async function GET() {
 
     for (const inbound of inboundEmails) {
       const convKey = `${inbound.campaignId}:${inbound.gmailThreadId}`;
-      const thread = conversationMap.get(convKey);
-      if (!thread) continue;
+      let thread = conversationMap.get(convKey);
+      if (!thread) {
+        const altKey = `${inbound.campaignId}:${inbound.senderEmail.toLowerCase()}`;
+        thread = conversationMap.get(altKey);
+      }
 
       const leadInfo = leadByIdMap.get(inbound.leadId) || leadByEmailMap.get(inbound.senderEmail.toLowerCase());
-      const senderName = inbound.senderName || leadInfo?.name || inbound.senderEmail.split("@")[0];
+      const senderName =
+        inbound.senderName ||
+        leadInfo?.name ||
+        (leadInfo?.firstName && leadInfo?.lastName ? `${leadInfo.firstName} ${leadInfo.lastName}` : "") ||
+        inbound.senderEmail.split("@")[0];
       const receivedAt = inbound.receivedAt.toISOString();
+
       const message: InboxMessage = {
         id: inbound.id,
         direction: "inbound",
@@ -348,36 +356,75 @@ export async function GET() {
         createdAt: receivedAt,
       };
 
-      thread.messages.push(message);
-      thread.messages.sort((a, b) => new Date(a.sentAt || a.createdAt).getTime() - new Date(b.sentAt || b.createdAt).getTime());
-      thread.folder = "inbox";
-      thread.isUnread = true;
-      thread.senderEmail = inbound.senderEmail;
-      thread.senderName = senderName;
-      thread.recipientEmail = inbound.recipientEmail;
-      thread.recipientName = userDisplayName;
-      thread.subject = inbound.subject;
-      thread.preview = previewText(inbound.body);
-      thread.body = inbound.body;
-      thread.status = "Replied";
-      thread.date = receivedAt;
-      thread.campaignName = inbound.campaign.name;
-      thread.lead = {
-        id: leadInfo?.id || inbound.leadId,
-        name: leadInfo?.name || senderName,
-        firstName: leadInfo?.firstName,
-        lastName: leadInfo?.lastName,
-        jobTitle: leadInfo?.jobTitle || "Contact",
-        role: leadInfo?.role,
-        company: leadInfo?.company || "Organization",
-        industry: leadInfo?.industry,
-        location: leadInfo?.location,
-        email: inbound.senderEmail,
-        status: "Replied",
-        matchScore: leadInfo?.matchScore || 90,
-        matchReason: leadInfo?.matchReason || "Replied to a campaign email",
-        verificationTag: leadInfo?.verificationTag || "Email verified",
-      };
+      if (!thread) {
+        thread = {
+          id: inbound.id,
+          threadId: convKey,
+          folder: "inbox",
+          isUnread: true,
+          senderEmail: inbound.senderEmail,
+          senderName,
+          recipientEmail: inbound.recipientEmail,
+          recipientName: userDisplayName,
+          subject: inbound.subject,
+          preview: previewText(inbound.body),
+          body: inbound.body,
+          status: "Replied",
+          date: receivedAt,
+          campaignId: inbound.campaignId,
+          campaignName: inbound.campaign?.name || "Outbound Campaign",
+          leadId: leadInfo?.id || inbound.leadId,
+          lead: {
+            id: leadInfo?.id || inbound.leadId,
+            name: senderName,
+            firstName: leadInfo?.firstName,
+            lastName: leadInfo?.lastName,
+            jobTitle: leadInfo?.jobTitle || "Contact",
+            role: leadInfo?.role,
+            company: leadInfo?.company || "Organization",
+            industry: leadInfo?.industry,
+            location: leadInfo?.location,
+            email: inbound.senderEmail,
+            status: "Replied",
+            matchScore: leadInfo?.matchScore || 90,
+            matchReason: leadInfo?.matchReason || "Replied to outreach",
+            verificationTag: leadInfo?.verificationTag || "Email verified",
+          },
+          messages: [message],
+        };
+        conversationMap.set(convKey, thread);
+      } else {
+        thread.messages.push(message);
+        thread.messages.sort((a, b) => new Date(a.sentAt || a.createdAt).getTime() - new Date(b.sentAt || b.createdAt).getTime());
+        thread.folder = "inbox";
+        thread.isUnread = true;
+        thread.senderEmail = inbound.senderEmail;
+        thread.senderName = senderName;
+        thread.recipientEmail = inbound.recipientEmail;
+        thread.recipientName = userDisplayName;
+        thread.subject = inbound.subject;
+        thread.preview = previewText(inbound.body);
+        thread.body = inbound.body;
+        thread.status = "Replied";
+        thread.date = receivedAt;
+        if (inbound.campaign?.name) thread.campaignName = inbound.campaign.name;
+        thread.lead = {
+          id: leadInfo?.id || inbound.leadId,
+          name: senderName,
+          firstName: leadInfo?.firstName,
+          lastName: leadInfo?.lastName,
+          jobTitle: leadInfo?.jobTitle || "Contact",
+          role: leadInfo?.role,
+          company: leadInfo?.company || "Organization",
+          industry: leadInfo?.industry,
+          location: leadInfo?.location,
+          email: inbound.senderEmail,
+          status: "Replied",
+          matchScore: leadInfo?.matchScore || 90,
+          matchReason: leadInfo?.matchReason || "Replied to a campaign email",
+          verificationTag: leadInfo?.verificationTag || "Email verified",
+        };
+      }
     }
 
     // Populate Inbox items from threads with replies or inbound messages
@@ -500,10 +547,13 @@ export async function POST(request: NextRequest) {
     }
 
     if (!targetCampaignId) {
+      const campaignName = /^(?:(?:csv|direct|outbound)\s+)?(?:campaign|outreach)$/i.test(subject)
+        ? recipient
+        : subject.slice(0, 48);
       const newCampaign = await db.campaign.create({
         data: {
           userId,
-          name: "Direct Outreach",
+          name: campaignName,
           prompt: "Direct outbound message from Inbox",
           status: "Live",
           selectedLeadIds: leadId ? [leadId] : [],

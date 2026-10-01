@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { useSession, signIn } from "next-auth/react";
-import { ArrowLeft, ArrowRight, Check, Loader2, Sparkles, AlertCircle, RotateCcw } from "lucide-react";
+import { ArrowLeft, ArrowRight, Loader2, Sparkles, AlertCircle, RotateCcw } from "lucide-react";
 import { leadDomain } from "../../lib/leadDisplay";
 import type { Lead } from "../../types";
 import LeadLensLogo from "../common/LeadLensLogo";
@@ -24,6 +24,9 @@ interface LeadGenerationModuleProps {
   onBackToLanding?: () => void;
 }
 
+const MAX_PREVIEW_LEADS = 8;
+const INITIAL_VISIBLE_LEADS = 3;
+
 export default function LeadGenerationModule({
   prompt,
   initialLeads,
@@ -37,15 +40,20 @@ export default function LeadGenerationModule({
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [error, setError] = useState("");
-  const [loadingStep, setLoadingStep] = useState(0);
+  const [, setLoadingStep] = useState(0);
 
-  const loadingSteps = [
+  // Selected leads: initialized to first 3 leads
+  const [selected, setSelected] = useState<Set<string>>(() =>
+    new Set((initialLeads || []).slice(0, 3).map((lead) => lead.id)),
+  );
+
+  const loadingSteps = useMemo(() => [
     "Extracting ICP and search criteria with Groq AI...",
     "Discovering active businesses via Geoapify...",
-    "Confirming official company domains with Tavily...",
+    "Verifying official company domains...",
     "Verifying decision-maker emails & deliverability...",
     "Scoring leads and applying compliance checks...",
-  ];
+  ], []);
 
   // Fetch real leads from the backend lead generation pipeline
   const fetchLeads = useCallback(async (promptText: string) => {
@@ -89,24 +97,27 @@ export default function LeadGenerationModule({
       clearInterval(stepInterval);
       setLoading(false);
     }
-  }, []);
+  }, [loadingSteps]);
 
   useEffect(() => {
     if (!initialLeads || initialLeads.length === 0) {
-      fetchLeads(prompt);
+      const timer = window.setTimeout(() => {
+        void fetchLeads(prompt);
+      }, 0);
+      return () => window.clearTimeout(timer);
     }
   }, [prompt, initialLeads, fetchLeads]);
 
-  // Visible leads: initially 3 reviewed leads, reveals all 8 after clicking Show More Leads
-  const visibleLeads = useMemo(
-    () => (revealedAll ? allGeneratedLeads : allGeneratedLeads.slice(0, 3)),
-    [revealedAll, allGeneratedLeads],
+  const previewLeads = useMemo(
+    () => allGeneratedLeads.slice(0, MAX_PREVIEW_LEADS),
+    [allGeneratedLeads],
   );
 
-  // Selected leads: initialized to first 3 leads
-  const [selected, setSelected] = useState<Set<string>>(() =>
-    new Set((initialLeads || []).slice(0, 3).map((lead) => lead.id)),
+  const visibleLeads = useMemo(
+    () => (revealedAll ? previewLeads : previewLeads.slice(0, INITIAL_VISIBLE_LEADS)),
+    [revealedAll, previewLeads],
   );
+  const visibleSelectedCount = visibleLeads.filter((lead) => selected.has(lead.id)).length;
 
   const toggle = (id: string) => {
     setSelected((current) => {
@@ -121,7 +132,7 @@ export default function LeadGenerationModule({
     setRevealedAll(true);
     setSelected((current) => {
       const next = new Set(current);
-      allGeneratedLeads.forEach((lead) => next.add(lead.id));
+      previewLeads.forEach((lead) => next.add(lead.id));
       return next;
     });
   };
@@ -173,30 +184,9 @@ export default function LeadGenerationModule({
   // Loading State
   if (loading) {
     return (
-      <main className="min-h-screen bg-canvas px-4 py-8 sm:px-6 flex flex-col items-center justify-center">
-        <div className="mx-auto w-full max-w-lg text-center bg-white rounded-3xl border border-line p-8 shadow-xs">
-          <div className="flex justify-center mb-5">
-            <div className="h-12 w-12 rounded-2xl bg-green-soft flex items-center justify-center text-green shadow-2xs">
-              <Sparkles className="h-6 w-6 animate-pulse" />
-            </div>
-          </div>
-          <h2 className="font-serif text-2xl font-bold text-ink">Generating Reviewed Leads</h2>
-          <p className="mt-2 text-xs text-muted max-w-sm mx-auto">
-            Our pipeline is searching, verifying domains, validating emails, and scoring decision makers in real time.
-          </p>
-
-          <div className="mt-6 rounded-2xl bg-canvas border border-line p-4 text-left space-y-3">
-            <div className="flex items-center gap-3">
-              <span className="h-4 w-4 animate-spin rounded-full border-2 border-green border-t-transparent shrink-0" />
-              <span className="text-xs font-semibold text-ink">{loadingSteps[loadingStep]}</span>
-            </div>
-            <div className="w-full bg-mist rounded-full h-1.5 overflow-hidden">
-              <div
-                className="bg-green h-full transition-all duration-500 rounded-full"
-                style={{ width: `${((loadingStep + 1) / loadingSteps.length) * 100}%` }}
-              />
-            </div>
-          </div>
+      <main className="flex min-h-screen items-center justify-center bg-canvas px-4 sm:px-6">
+        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-green-soft text-green shadow-2xs">
+          <Sparkles className="h-6 w-6 animate-pulse" />
         </div>
       </main>
     );
@@ -250,8 +240,8 @@ export default function LeadGenerationModule({
               </h1>
               <p className="text-xs text-muted">
                 {revealedAll
-                  ? `All ${allGeneratedLeads.length} verified leads unlocked`
-                  : `Showing 3 of ${allGeneratedLeads.length} matching leads`}
+                  ? `All ${visibleLeads.length} leads unlocked`
+                  : `Showing ${visibleLeads.length} of ${previewLeads.length} matching leads`}
               </p>
             </div>
           </div>
@@ -311,17 +301,6 @@ export default function LeadGenerationModule({
                 </div>
 
                 <div className="flex items-center gap-2.5 shrink-0">
-                  <span
-                    className={`hidden sm:inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                      lead.verificationTag === "Email verified"
-                        ? "bg-green-soft text-green"
-                        : lead.verificationTag === "Enriched"
-                          ? "bg-blue-50 text-blue-700 border border-blue-200"
-                          : "bg-amber-50 text-amber-700 border border-amber-200"
-                    }`}
-                  >
-                    {lead.verificationTag}
-                  </span>
                   <span className="rounded-full bg-mist px-2.5 py-0.5 text-xs font-bold text-ink">
                     {lead.matchScore}%
                   </span>
@@ -334,11 +313,11 @@ export default function LeadGenerationModule({
         {/* Bottom Actions */}
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 pt-2">
           <p className="text-xs text-muted">
-            {selected.size} of {visibleLeads.length} leads selected
+            {visibleSelectedCount} of {visibleLeads.length} leads selected
           </p>
 
           <div className="flex items-center gap-2">
-            {!revealedAll ? (
+            {!revealedAll && previewLeads.length > INITIAL_VISIBLE_LEADS ? (
               <button
                 type="button"
                 onClick={handleShowMoreLeads}
@@ -349,13 +328,15 @@ export default function LeadGenerationModule({
               </button>
             ) : (
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setRevealedAll(false)}
-                  className="btn btn-secondary text-xs sm:text-sm py-2 px-3 cursor-pointer"
-                >
-                  Show Less
-                </button>
+                {revealedAll && previewLeads.length > INITIAL_VISIBLE_LEADS && (
+                  <button
+                    type="button"
+                    onClick={() => setRevealedAll(false)}
+                    className="btn btn-secondary text-xs sm:text-sm py-2 px-3 cursor-pointer"
+                  >
+                    Show Less
+                  </button>
+                )}
                 {status === "authenticated" ? (
                   <button
                     type="button"
@@ -405,7 +386,7 @@ export default function LeadGenerationModule({
             <div className="mt-6">
               <div className="inline-flex items-center gap-1.5 rounded-full bg-green-soft px-3 py-1 text-xs font-bold text-green">
                 <Sparkles className="h-3.5 w-3.5" />
-                <span>All {allGeneratedLeads.length} leads unlocked</span>
+                <span>All {visibleLeads.length} leads unlocked</span>
               </div>
               <h2 className="mt-3 font-serif text-2xl font-bold tracking-tight text-ink">
                 Sign in to continue
@@ -435,7 +416,7 @@ export default function LeadGenerationModule({
                   </>
                 ) : (
                   <>
-                    <svg className="h-4 w-4" viewBox="0 0 24 24">
+                    <svg className="h-4 w-4" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                       <path
                         fill="#4285F4"
                         d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"

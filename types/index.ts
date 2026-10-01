@@ -28,6 +28,7 @@ export type Campaign = {
   id: string;
   userId?: string | null;
   name: string;
+  displayName?: string;
   brief: string;
   prompt?: string;
   selectedLeadIds?: string[];
@@ -35,6 +36,7 @@ export type Campaign = {
   connectedEmail?: string | null;
   provider?: string | null;
   status: 'Draft saved' | 'Live' | 'Ready' | 'Partially sent' | 'Failed';
+  startedAt?: string | null;
   leadsCount: number;
   sentCount: number;
   failedCount?: number;
@@ -42,6 +44,11 @@ export type Campaign = {
   personalizedEmails?: Record<string, {
     step: number;
     delayDays: number;
+    intervalDays?: number;
+    scheduledAt?: string | null;
+    scheduledTime?: string;
+    scheduleMode?: "default" | "custom";
+    customSendAt?: string;
     subject: string;
     body: string;
     manuallyEdited?: boolean;
@@ -49,6 +56,11 @@ export type Campaign = {
   sequence: {
     step: number;
     delayDays: number;
+    intervalDays?: number;
+    scheduledAt?: string | null;
+    scheduledTime?: string;
+    scheduleMode?: "default" | "custom";
+    customSendAt?: string;
     subject: string;
     body: string;
     manuallyEdited?: boolean;

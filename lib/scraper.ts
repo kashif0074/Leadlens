@@ -124,7 +124,7 @@ function extractCleanText(html: string): string {
   }
 }
 
-function extractEmailsFromHtml(html: string, domain: string): string[] {
+function extractEmailsFromHtml(html: string, domain?: string): string[] {
   try {
     const $ = cheerio.load(html);
     const emails = new Set<string>();
@@ -156,6 +156,14 @@ function extractEmailsFromHtml(html: string, domain: string): string[] {
         !em.includes("schema.org")
       ) {
         emails.add(em);
+      }
+    }
+
+    if (domain) {
+      const cleanDomain = domain.replace(/^https?:\/\//, "").replace(/^www\./, "").toLowerCase();
+      const domainMatches = Array.from(emails).filter((e) => e.endsWith(`@${cleanDomain}`));
+      if (domainMatches.length > 0) {
+        return domainMatches;
       }
     }
 

@@ -14,6 +14,7 @@ type StoredCampaign = {
   provider?: string | null;
   sentCount?: number;
   failedCount?: number;
+  startedAt?: Date | null;
 };
 
 function asLeadArray(value: unknown): Lead[] {
@@ -60,6 +61,7 @@ export function mapStoredCampaign(campaign: StoredCampaign): Campaign {
     connectedEmail: campaign.connectedEmail,
     provider: campaign.provider,
     status: asStatus(campaign.status),
+    startedAt: campaign.startedAt?.toISOString() ?? null,
     leadsCount: ids.length || selectedLeads.length,
     sentCount: campaign.sentCount ?? 0,
     failedCount: campaign.failedCount ?? 0,
@@ -130,4 +132,19 @@ export function personalizeText(template: string, lead: Partial<Lead>): string {
   result = result.replace(/\{\{\s*[a-zA-Z0-9_-]+\s*\}\}/g, "");
 
   return result.trim();
+}
+
+export function personalizeEmailBody(template: string, lead: Partial<Lead>): string {
+  const firstName =
+    (typeof lead.firstName === "string" && lead.firstName.trim()) ||
+    lead.name?.trim().split(/\s+/)[0] ||
+    "there";
+  const body = personalizeText(template, lead);
+  const greeting = /^\s*(?:hi|hello|dear)\s+[^,\n]+[,!]?[ \t]*/i;
+
+  if (greeting.test(body)) {
+    return body.replace(greeting, `Hi ${firstName},\n\n`).trim();
+  }
+
+  return `Hi ${firstName},\n\n${body}`.trim();
 }

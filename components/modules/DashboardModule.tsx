@@ -66,7 +66,7 @@ export default function DashboardModule({
           <div className="flex items-center justify-between gap-4 bg-green-dark px-6 py-4 text-white">
             <div>
               <p className="text-xs font-semibold tracking-wider text-green-soft uppercase">Current campaign</p>
-              <h2 className="mt-1 text-lg font-bold">{activeCampaign?.name ?? "No campaign started"}</h2>
+              <h2 className="mt-1 text-lg font-bold">{activeCampaign?.displayName ?? activeCampaign?.name ?? "No campaign started"}</h2>
             </div>
             <span className="flex items-center gap-1.5 text-xs font-semibold text-green-soft">
               <span
@@ -197,7 +197,7 @@ export default function DashboardModule({
                 }`}
               >
                 <div className="flex items-center justify-between gap-3">
-                  <span className="font-bold text-ink">{campaign.name}</span>
+                  <span className="font-bold text-ink">{campaign.displayName ?? campaign.name}</span>
                   <span
                     className={`status ${
                       campaign.status === "Live" || campaign.status === "Partially sent"

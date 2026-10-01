@@ -105,7 +105,7 @@ export function mapIndustryToCategory(industry: string): string {
     [/accounting|audit|tax|cpa/i, "office.accountant"],
     [/legal|law firm|solicitor|attorney|lawyer/i, "office.lawyer"],
     [/software|saas|it|tech|cloud|cybersecurity|ai|app developer/i, "office.it"],
-    [/logistics|freight|supply chain|shipping|warehousing/i, "commercial.logistics"],
+    [/logistics|freight|supply chain|shipping|warehousing/i, "office.logistics"],
     [/restaurant|cafe|catering|hospitality|food/i, "catering.restaurant"],
     [/retail|ecommerce|shopping|store/i, "commercial.shopping_mall"],
   ];
@@ -116,7 +116,7 @@ export function mapIndustryToCategory(industry: string): string {
     }
   }
 
-  return "commercial.office";
+  return "office";
 }
 
 /**
@@ -135,7 +135,12 @@ export async function searchBusinessesByCategory(
     return [];
   }
 
-  const categoriesToTry = [category, "office.advertising_agency,office.consulting,office.it", "commercial.office", "commercial"];
+  const categoriesToTry = Array.from(new Set([
+    category,
+    "office.advertising_agency,office.consulting,office.it",
+    "office",
+    "commercial",
+  ]));
 
   for (const cat of categoriesToTry) {
     try {
@@ -158,7 +163,28 @@ export async function searchBusinessesByCategory(
       const features = data.features || [];
 
       if (features.length > 0) {
-        return features.map((f: any) => {
+        return features.map((f: {
+          properties?: {
+            name?: string;
+            address_line1?: string;
+            address_line2?: string;
+            formatted?: string;
+            website?: string;
+            phone?: string;
+            categories?: string[];
+            city?: string;
+            county?: string;
+            state?: string;
+            region?: string;
+            country?: string;
+            lat?: number;
+            lon?: number;
+            contact?: {
+              website?: string;
+              phone?: string;
+            };
+          };
+        }) => {
           const props = f.properties || {};
           return {
             name: props.name || props.address_line1 || "Business",

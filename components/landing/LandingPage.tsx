@@ -305,11 +305,11 @@ export default function LandingPage({ onStartCampaign, onEnterApp }: LandingPage
                   Connect & Safeguard
                 </h3>
                 <p className="text-xs text-[#5A6672] mt-2 leading-relaxed">
-                  Connect your Google or Microsoft sending inbox. Our automated warmup and rate-limiting shield keeps you out of spam folders.
+                  Connect a managed sending inbox. Conservative pacing supports responsible delivery; mailbox providers decide where messages are placed.
                 </p>
               </div>
               <div className="mt-4 pt-3 border-t border-[#E3E8E7] text-[11px] font-semibold text-[#045C5C]">
-                99%+ inbox placement guaranteed
+                Placement decided by providers
               </div>
             </div>
 

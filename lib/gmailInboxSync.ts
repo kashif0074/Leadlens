@@ -59,11 +59,42 @@ function getHeader(message: gmail_v1.Schema$Message, name: string) {
   return message.payload?.headers?.find((header) => header.name?.toLowerCase() === name.toLowerCase())?.value?.trim() ?? "";
 }
 
+function decodeRfc2047(text: string): string {
+  if (!text) return "";
+  return text.replace(/=\?([^?]+)\?([BQbq])\?([^?]+)\?=/g, (_, charset, encoding, encodedText) => {
+    try {
+      if (encoding.toUpperCase() === "B") {
+        return Buffer.from(encodedText, "base64").toString(charset.toLowerCase() === "utf-8" ? "utf8" : "latin1");
+      } else if (encoding.toUpperCase() === "Q") {
+        return encodedText
+          .replace(/_/g, " ")
+          .replace(/=([0-9A-Fa-f]{2})/g, (__: string, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+      }
+    } catch {
+      return encodedText;
+    }
+    return encodedText;
+  });
+}
+
 function parseMailbox(value: string) {
-  const match = value.match(/^\s*(.*?)\s*<([^<>]+)>\s*$/);
-  const email = (match?.[2] ?? value).trim().replace(/^mailto:/i, "").toLowerCase();
-  const name = (match?.[1] ?? "").replace(/^"|"$/g, "").trim();
-  return { email, name };
+  if (!value) return { email: "", name: "" };
+  const decodedValue = decodeRfc2047(value.trim());
+  const match = decodedValue.match(/^\s*"?([^"<]*)"?\s*<([^<>]+)>\s*$/);
+  if (match) {
+    const name = match[1].replace(/^["']|["']$/g, "").trim();
+    const email = match[2].trim().replace(/^mailto:/i, "").toLowerCase();
+    return { email, name };
+  }
+  const emailOnlyMatch = decodedValue.match(/<([^<>]+)>/);
+  if (emailOnlyMatch) {
+    return { email: emailOnlyMatch[1].trim().toLowerCase(), name: "" };
+  }
+  const clean = decodedValue.trim().replace(/^mailto:/i, "").toLowerCase();
+  if (clean.includes("@")) {
+    return { email: clean, name: "" };
+  }
+  return { email: decodedValue.trim(), name: "" };
 }
 
 function parseMailboxList(value: string) {
@@ -332,7 +363,13 @@ export async function syncGmailInbox(userId: string) {
             body: messageBody(message),
             receivedAt: new Date(Number(message.internalDate) || Date.now()),
           },
-          update: {},
+          update: {
+            senderEmail: from.email,
+            senderName: from.name || null,
+            subject: getHeader(message, "Subject") || "(No subject)",
+            body: messageBody(message),
+            receivedAt: new Date(Number(message.internalDate) || Date.now()),
+          },
           select: { id: true },
         });
         if (saved.id) importedCount++;

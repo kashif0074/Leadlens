@@ -4,8 +4,11 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/auth";
 import { db } from "@/lib/db";
 import { sendGmailMessage } from "@/lib/gmailApi";
-import { personalizeText } from "@/lib/campaigns";
+import { personalizeEmailBody, personalizeText } from "@/lib/campaigns";
 import { createUnsubscribeUrl } from "@/lib/unsubscribe";
+import { getEmailRetryAt, isRetryableEmailError, MAX_DELIVERY_ATTEMPTS } from "@/lib/emailQueue";
+import { checkDomainAuthentication } from "@/lib/emailDeliverability";
+import "@/lib/scheduler";
 
 import type { Campaign, Lead } from "@/types";
 
@@ -15,7 +18,7 @@ const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const MAX_RECIPIENTS_PER_LAUNCH = 10;
 const MAX_EMAILS_PER_SENDER_PER_24_HOURS = 50;
-const SEND_INTERVAL_MS = 1200;
+const MAX_INLINE_SENDS_PER_LAUNCH = 1;
 
 export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -267,7 +270,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const senderEmail = emailAccount.email;
+    const senderDomain = emailAccount.email.split("@")[1]?.toLowerCase() ?? "";
+    if (senderDomain && !["gmail.com", "googlemail.com"].includes(senderDomain)) {
+      const domainAuth = await checkDomainAuthentication(senderDomain);
+      const missingRecords = [
+        !domainAuth.spf.configured ? "SPF" : null,
+        !domainAuth.dkim.configured ? "DKIM" : null,
+        !domainAuth.dmarc.configured ? "DMARC" : null,
+      ].filter((record): record is string => Boolean(record));
+
+      if (missingRecords.length) {
+        const recommendations = domainAuth.recommendations.join(" ");
+        return NextResponse.json(
+          {
+            error: `Sending domain ${senderDomain} is missing verified ${missingRecords.join(", ")} authentication. Publish the required DNS records before sending.${recommendations ? ` ${recommendations}` : ""}`,
+            authentication: domainAuth,
+          },
+          { status: 409 },
+        );
+      }
+    }
 
     // ---------------------------------------------------------
     // 7. Check suppressions
@@ -342,7 +364,7 @@ export async function POST(request: NextRequest) {
       Date.now() - 24 * 60 * 60 * 1000,
     );
 
-    const [sentInLast24Hours, previouslySent] =
+    const [sentInLast24Hours, existingDeliveries, reservedDeliveries] =
       await Promise.all([
         db.emailDelivery.count({
           where: {
@@ -379,24 +401,32 @@ export async function POST(request: NextRequest) {
               in: uniqueLeadIds,
             },
             step: 1,
-            status: "Sent",
           },
           select: {
             leadId: true,
+            status: true,
+          },
+        }),
+        db.emailDelivery.count({
+          where: {
+            senderEmail: emailAccount.email,
+            createdAt: { gte: since },
+            status: { in: ["Pending", "Sending"] },
+            campaign: { is: { userId: session.user.id } },
           },
         }),
       ]);
 
-    const previouslySentIds = new Set(
-      previouslySent.map((delivery) => delivery.leadId),
+    const existingDeliveryIds = new Set(
+      existingDeliveries.map((delivery) => delivery.leadId),
     );
 
     const newRecipientCount = leadsToProcess.filter(
-      (lead) => !previouslySentIds.has(lead.id),
+      (lead) => !existingDeliveryIds.has(lead.id),
     ).length;
 
     if (
-      sentInLast24Hours + newRecipientCount >
+      sentInLast24Hours + reservedDeliveries + newRecipientCount >
       MAX_EMAILS_PER_SENDER_PER_24_HOURS
     ) {
       return NextResponse.json(
@@ -443,6 +473,16 @@ export async function POST(request: NextRequest) {
     let failedCount = 0;
     let pendingCount = 0;
     let sendAttempts = 0;
+    const startedAt = campaign.startedAt ?? new Date();
+
+    await db.campaign.update({
+      where: {
+        id: campaign.id,
+      },
+      data: {
+        startedAt,
+      },
+    });
 
     // ---------------------------------------------------------
     // 11. Send emails
@@ -523,7 +563,7 @@ Regards,`;
         lead,
       );
 
-      const bodyText = personalizeText(
+      const bodyText = personalizeEmailBody(
         bodyTemplate,
         lead,
       );
@@ -596,6 +636,24 @@ Regards,`;
           },
         });
 
+      if (
+        deliveryRecord.status === "Failed" &&
+        deliveryRecord.attemptCount >= MAX_DELIVERY_ATTEMPTS
+      ) {
+        outcomes.push({ leadId: lead.id, recipient, status: "Failed", error: deliveryRecord.error ?? "Maximum delivery attempts reached." });
+        failedCount++;
+        continue;
+      }
+
+      if (
+        sendAttempts >= MAX_INLINE_SENDS_PER_LAUNCH ||
+        (deliveryRecord.nextAttemptAt && deliveryRecord.nextAttemptAt > new Date())
+      ) {
+        outcomes.push({ leadId: lead.id, recipient, status: "Pending" });
+        pendingCount++;
+        continue;
+      }
+
       // -------------------------------------------------------
       // Claim delivery
       // -------------------------------------------------------
@@ -605,9 +663,13 @@ Regards,`;
           status: {
             in: ["Pending", "Failed"],
           },
+          attemptCount: { lt: MAX_DELIVERY_ATTEMPTS },
+          OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: new Date() } }],
         },
         data: {
           status: "Sending",
+          attemptCount: { increment: 1 },
+          nextAttemptAt: null,
           error: null,
         },
       });
@@ -646,6 +708,8 @@ Regards,`;
 
         if (wasSent) {
           sentCount++;
+        } else if (currentDelivery?.status === "Failed") {
+          failedCount++;
         } else {
           pendingCount++;
         }
@@ -653,16 +717,12 @@ Regards,`;
         continue;
       }
 
+      const attempt = deliveryRecord.attemptCount + 1;
+
       // -------------------------------------------------------
       // Send through Gmail API
       // -------------------------------------------------------
       try {
-        if (sendAttempts > 0) {
-          await new Promise((resolve) =>
-            setTimeout(resolve, SEND_INTERVAL_MS),
-          );
-        }
-
         sendAttempts++;
 
         const sendResult = await sendGmailMessage({
@@ -672,6 +732,7 @@ Regards,`;
           subject,
           body: bodyText,
           unsubscribeUrl,
+          deliveryId: deliveryRecord.id,
         });
 
         await db.emailDelivery.update({
@@ -683,6 +744,7 @@ Regards,`;
             messageId: sendResult.messageId,
             gmailThreadId: sendResult.threadId,
             sentAt: new Date(),
+            nextAttemptAt: null,
             error: null,
           },
         });
@@ -700,6 +762,7 @@ Regards,`;
           sendError instanceof Error
             ? sendError.message
             : "Gmail API send failed.";
+        const shouldRetry = isRetryableEmailError(sendError) && attempt < MAX_DELIVERY_ATTEMPTS;
 
         console.error(
           `[Launch] Failed to send email to ${recipient}:`,
@@ -711,7 +774,8 @@ Regards,`;
             id: deliveryRecord.id,
           },
           data: {
-            status: "Failed",
+            status: shouldRetry ? "Pending" : "Failed",
+            nextAttemptAt: shouldRetry ? getEmailRetryAt(attempt) : null,
             error: errorMessage.slice(0, 4000),
           },
         });
@@ -719,11 +783,12 @@ Regards,`;
         outcomes.push({
           leadId: lead.id,
           recipient,
-          status: "Failed",
+          status: shouldRetry ? "Pending" : "Failed",
           error: errorMessage,
         });
 
-        failedCount++;
+        if (shouldRetry) pendingCount++;
+        else failedCount++;
       }
     }
 
@@ -733,7 +798,7 @@ Regards,`;
     const totalProcessed = leadsToProcess.length;
 
     const campaignStatus = pendingCount
-      ? campaign.status
+      ? "Live"
       : sentCount === totalProcessed &&
           totalProcessed > 0
         ? "Live"
@@ -743,26 +808,23 @@ Regards,`;
             ? "Failed"
             : "Ready";
 
-    if (!pendingCount) {
-      await db.campaign.update({
-        where: {
-          id: campaign.id,
-        },
-        data: {
-          status: campaignStatus,
-          selectedLeadIds: uniqueLeadIds,
-          selectedLeads:
-            leadsToProcess as unknown as object,
-          connectedEmail: emailAccount.email,
-          provider:
-            body.provider ??
-            campaign.provider ??
-            "Google Workspace / Gmail",
-          sentCount,
-          failedCount,
-        },
-      });
-    }
+    const [campaignSentCount, campaignFailedCount] = await Promise.all([
+      db.emailDelivery.count({ where: { campaignId: campaign.id, status: "Sent" } }),
+      db.emailDelivery.count({ where: { campaignId: campaign.id, status: "Failed" } }),
+    ]);
+    await db.campaign.update({
+      where: { id: campaign.id },
+      data: {
+        status: campaignStatus,
+        selectedLeadIds: uniqueLeadIds,
+        selectedLeads: leadsToProcess as unknown as object,
+        connectedEmail: emailAccount.email,
+        provider: body.provider ?? campaign.provider ?? "Google Workspace / Gmail",
+        startedAt,
+        sentCount: campaignSentCount,
+        failedCount: campaignFailedCount,
+      },
+    });
 
     return NextResponse.json({
       status: campaignStatus,
@@ -770,6 +832,7 @@ Regards,`;
       failedCount,
       pendingCount,
       total: totalProcessed,
+      startedAt: startedAt.toISOString(),
       outcomes,
     });
   } catch (error) {

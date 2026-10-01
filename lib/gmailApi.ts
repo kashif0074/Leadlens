@@ -1,18 +1,30 @@
 import { google } from "googleapis";
 import { db } from "@/lib/db";
 import { decrypt, encrypt } from "@/lib/crypto";
-import {
-  createGoogleOAuthClient,
-} from "@/lib/googleOAuth";
+import { createGoogleOAuthClient } from "@/lib/googleOAuth";
+import { buildCompliantMimeMessage, encodeMimeHeaderValue, sanitizeMimeHeader } from "@/lib/emailDeliverability";
 
-type SendGmailParams = {
+export type SendGmailParams = {
   emailAccountId: string;
   userId: string;
   to: string;
   subject: string;
   body: string;
+  threadId?: string;
+  inReplyTo?: string;
+  references?: string;
   unsubscribeUrl?: string;
+  deliveryId?: string;
 };
+
+function formatFromHeader(displayName: string, email: string): string {
+  const cleanName = sanitizeMimeHeader(displayName);
+  if (!cleanName) return email;
+  const formattedName = /[^\x20-\x7e]/.test(cleanName)
+    ? encodeMimeHeaderValue(cleanName)
+    : `"${cleanName.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`;
+  return `${formattedName} <${email}>`;
+}
 
 function base64UrlEncode(input: string): string {
   return Buffer.from(input, "utf8")
@@ -22,37 +34,23 @@ function base64UrlEncode(input: string): string {
     .replace(/=+$/, "");
 }
 
-function createMimeMessage({
-  to,
-  from,
-  subject,
-  body,
-}: {
-  to: string;
-  from: string;
-  subject: string;
-  body: string;
-}) {
-  return [
-    `From: ${from}`,
-    `To: ${to}`,
-    `Subject: ${subject}`,
-    "MIME-Version: 1.0",
-    "Content-Type: text/plain; charset=UTF-8",
-    "Content-Transfer-Encoding: 8bit",
-    "",
-    body,
-  ].join("\r\n");
-}
-
+/**
+ * Sends an email via Google Gmail API with OAuth2 credentials.
+ * Formats RFC-compliant multipart/alternative MIME message (plain text + clean HTML)
+ * and applies rate-limit backoff on transient network/quota errors.
+ */
 export async function sendGmailMessage({
   emailAccountId,
   userId,
   to,
   subject,
   body,
+  threadId,
+  inReplyTo,
+  references,
   unsubscribeUrl,
-}: SendGmailParams) {
+  deliveryId,
+}: SendGmailParams): Promise<{ messageId?: string; threadId?: string }> {
   const account = await db.emailAccount.findFirst({
     where: {
       id: emailAccountId,
@@ -70,20 +68,14 @@ export async function sendGmailMessage({
   });
 
   if (!account || !account.refreshToken) {
-    throw new Error(
-      "Reconnect required. Connect Gmail again before sending this campaign.",
-    );
+    throw new Error("Reconnect required. Connect Gmail again before sending this campaign.");
   }
 
   if (account.status !== "connected") {
-    throw new Error(
-      "Reconnect required. Connect Gmail again before sending this campaign.",
-    );
+    throw new Error("Reconnect required. Connect Gmail again before sending this campaign.");
   }
 
-  let accessToken = account.accessToken
-    ? decrypt(account.accessToken)
-    : "";
+  let accessToken = account.accessToken ? decrypt(account.accessToken) : "";
 
   const tokenIsFresh =
     Boolean(accessToken) &&
@@ -100,10 +92,7 @@ export async function sendGmailMessage({
     try {
       const result = await oauth.getAccessToken();
 
-      accessToken =
-        result.token ||
-        oauth.credentials.access_token ||
-        "";
+      accessToken = result.token || oauth.credentials.access_token || "";
 
       const expiresAt = oauth.credentials.expiry_date
         ? new Date(oauth.credentials.expiry_date)
@@ -135,8 +124,7 @@ export async function sendGmailMessage({
             };
             code?: string;
           }
-        ).response?.data?.error ||
-        (error as { code?: string }).code;
+        ).response?.data?.error || (error as { code?: string }).code;
 
       if (code === "invalid_grant") {
         await db.emailAccount.updateMany({
@@ -149,9 +137,7 @@ export async function sendGmailMessage({
           },
         });
 
-        throw new Error(
-          "Reconnect required. Gmail authorization expired or was revoked.",
-        );
+        throw new Error("Reconnect required. Gmail authorization expired or was revoked.");
       }
 
       throw new Error("Unable to refresh Gmail authorization.");
@@ -170,57 +156,90 @@ export async function sendGmailMessage({
     auth: oauth,
   });
 
-  const fromHeader = account.displayName
-    ? `${account.displayName} <${account.email}>`
-    : account.email;
+  const fromHeader = formatFromHeader(account.displayName ?? "", account.email);
+  const rawSenderDomain = account.email.includes("@") ? account.email.split("@")[1].toLowerCase() : "gmail.com";
+  const senderDomain = /^[a-z0-9.-]+$/.test(rawSenderDomain) ? rawSenderDomain : "gmail.com";
+  const safeDeliveryId = deliveryId?.replace(/[^a-zA-Z0-9_-]/g, "");
+  const rfcMessageId = safeDeliveryId ? `<leadlens-${safeDeliveryId}@${senderDomain}>` : undefined;
 
-  const finalBody = unsubscribeUrl
-    ? `${body}\n\nTo stop receiving these emails, unsubscribe: ${unsubscribeUrl}`
-    : body;
-
-  const mimeMessage = createMimeMessage({
+  // Build clean, standard multipart MIME message (text + HTML + headers)
+  const mimeMessage = buildCompliantMimeMessage({
     to,
     from: fromHeader,
+    replyTo: account.email,
     subject,
-    body: finalBody,
+    messageId: rfcMessageId,
+    plainText: body,
+    inReplyTo,
+    references,
+    unsubscribeUrl,
+    senderDomain,
   });
 
-  try {
-    const result = await gmail.users.messages.send({
-      userId: "me",
-      requestBody: {
-        raw: base64UrlEncode(mimeMessage),
-      },
-    });
+  // Queue retries are delayed and persistent; the stable Message-ID lets them detect an accepted send.
+  let attempts = 0;
+  const maxAttempts = 1;
 
-    return {
-      messageId: result.data.id || undefined,
-      threadId: result.data.threadId || undefined,
-    };
-  } catch (error) {
-    console.error("[Gmail API] Send failed:", error);
+  while (attempts < maxAttempts) {
+    attempts++;
+    try {
+      if (rfcMessageId) {
+        const existing = await gmail.users.messages.list({
+          userId: "me",
+          q: `in:sent rfc822msgid:${rfcMessageId.slice(1, -1)}`,
+          maxResults: 1,
+        });
+        const existingMessage = existing.data.messages?.[0];
+        if (existingMessage?.id) {
+          return { messageId: existingMessage.id, threadId: existingMessage.threadId || undefined };
+        }
+      }
 
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Gmail API failed to send the email.";
-
-    if (
-      /invalid_grant/i.test(message) ||
-      /unauthorized/i.test(message) ||
-      /401/i.test(message)
-    ) {
-      await db.emailAccount.updateMany({
-        where: {
-          id: account.id,
-          userId,
-        },
-        data: {
-          status: "reconnect_required",
+      const result = await gmail.users.messages.send({
+        userId: "me",
+        requestBody: {
+          raw: base64UrlEncode(mimeMessage),
+          ...(threadId ? { threadId } : {}),
         },
       });
-    }
 
-    throw new Error(message);
+      return {
+        messageId: result.data.id || undefined,
+        threadId: result.data.threadId || undefined,
+      };
+    } catch (error) {
+      const errorStr = error instanceof Error ? error.message : String(error);
+      const isRateLimit = /429|rateLimitExceeded|userRateLimitExceeded|quotaExceeded/i.test(errorStr);
+      const isTransient = isRateLimit || /503|backendError|socket|timeout|ECONNRESET/i.test(errorStr);
+
+      if (isTransient && attempts < maxAttempts) {
+        // Exponential backoff with random jitter (2000ms - 4000ms)
+        const delay = 2000 + Math.floor(Math.random() * 2000);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+
+      console.error("[Gmail API] Send failed:", error);
+
+      if (
+        /invalid_grant/i.test(errorStr) ||
+        /unauthorized/i.test(errorStr) ||
+        /401/i.test(errorStr)
+      ) {
+        await db.emailAccount.updateMany({
+          where: {
+            id: account.id,
+            userId,
+          },
+          data: {
+            status: "reconnect_required",
+          },
+        });
+      }
+
+      throw new Error(errorStr);
+    }
   }
+
+  throw new Error("Gmail API send failed after retry attempts.");
 }

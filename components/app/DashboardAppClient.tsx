@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
+import { useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { Sparkles } from "lucide-react";
 import type { AppModule, Campaign, Lead } from "../../types";
 import PromptOverlay from "../onboarding/PromptOverlay";
 import AppShell from "../layout/AppShell";
@@ -27,12 +29,13 @@ const EmailSequenceModule = dynamic(() => import("../modules/EmailSequenceModule
 
 function campaignNameFromBrief(brief: string) {
   const compact = brief.trim().replace(/\s+/g, " ");
-  return compact.length > 48 ? `${compact.slice(0, 48)}…` : compact || "Outbound campaign";
+  return compact.length > 48 ? `${compact.slice(0, 48)}…` : compact;
 }
 
 export default function DashboardAppClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { status: sessionStatus } = useSession();
   const [currentModule, setCurrentModule] = useState<AppModule>("dashboard");
   const [isPromptOverlayOpen, setIsPromptOverlayOpen] = useState(false);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -45,12 +48,13 @@ export default function DashboardAppClient() {
   const [loadingWorkspace, setLoadingWorkspace] = useState(true);
   const [onboardingGenerating, setOnboardingGenerating] = useState(false);
   const [onboardingError, setOnboardingError] = useState("");
-  const hasProcessedPendingOnboarding = useRef(false);
+  const hasInitializedWorkspace = useRef(false);
 
   // Check query params on mount
   useEffect(() => {
     if (searchParams.get("action") === "new-campaign") {
-      setIsPromptOverlayOpen(true);
+      const timer = window.setTimeout(() => setIsPromptOverlayOpen(true), 0);
+      return () => window.clearTimeout(timer);
     }
   }, [searchParams]);
 
@@ -60,9 +64,12 @@ export default function DashboardAppClient() {
     if (saved) {
       try {
         const context = JSON.parse(saved) as LeadGenerationContext;
-        setLeadGenerationPrompt(context.prompt);
-        setGeneratedLeads(context.allLeads ?? context.selectedLeads ?? []);
-        setCampaignLaunchContext(context);
+        const timer = window.setTimeout(() => {
+          setLeadGenerationPrompt(context.prompt);
+          setGeneratedLeads(context.allLeads ?? context.selectedLeads ?? []);
+          setCampaignLaunchContext(context);
+        }, 0);
+        return () => window.clearTimeout(timer);
       } catch {
         window.localStorage.removeItem("leadlens-workspace-context");
       }
@@ -113,30 +120,63 @@ export default function DashboardAppClient() {
 
   // Detect and process pending onboarding right after Google Authentication
   useEffect(() => {
-    if (hasProcessedPendingOnboarding.current) return;
+    if (sessionStatus === "loading" || hasInitializedWorkspace.current) return;
+
+    if (sessionStatus !== "authenticated") {
+      const hasPendingOnboarding = Boolean(window.localStorage.getItem("leadlens-pending-onboarding"));
+      const callbackPath = hasPendingOnboarding ? "/dashboard?continue=onboarding" : "/dashboard";
+      router.replace(`/login?callbackUrl=${encodeURIComponent(callbackPath)}&error=SessionRequired`);
+      return;
+    }
+
+    hasInitializedWorkspace.current = true;
 
     const pending = window.localStorage.getItem("leadlens-pending-onboarding");
     if (pending) {
-      hasProcessedPendingOnboarding.current = true;
+      let pendingContext: {
+        prompt: string;
+        selectedLeadIds: string[];
+        selectedLeads: Lead[];
+        allLeads: Lead[];
+      } | null = null;
+
       try {
-        const pendingContext = JSON.parse(pending) as {
+        const parsedContext = JSON.parse(pending) as {
           prompt: string;
           selectedLeadIds: string[];
           selectedLeads: Lead[];
           allLeads: Lead[];
         };
+        if (
+          !parsedContext.prompt ||
+          !Array.isArray(parsedContext.selectedLeadIds) ||
+          !Array.isArray(parsedContext.selectedLeads) ||
+          !Array.isArray(parsedContext.allLeads)
+        ) {
+          throw new Error("Pending campaign data is incomplete.");
+        }
+        pendingContext = parsedContext;
+      } catch {
         window.localStorage.removeItem("leadlens-pending-onboarding");
+      }
 
-        setOnboardingGenerating(true);
-        setOnboardingError("");
-        handleLeadGenerationComplete({
-          prompt: pendingContext.prompt,
-          selectedLeadIds: pendingContext.selectedLeadIds,
-          selectedLeads: pendingContext.selectedLeads,
-          allLeads: pendingContext.allLeads,
-          connectedEmail: "",
-          provider: "Google Workspace / Gmail",
-        })
+      if (pendingContext) {
+        void Promise.resolve()
+          .then(() => {
+            setOnboardingGenerating(true);
+            setOnboardingError("");
+            return handleLeadGenerationComplete({
+              prompt: pendingContext.prompt,
+              selectedLeadIds: pendingContext.selectedLeadIds,
+              selectedLeads: pendingContext.selectedLeads,
+              allLeads: pendingContext.allLeads,
+              connectedEmail: "",
+              provider: "Google Workspace / Gmail",
+            });
+          })
+          .then(() => {
+            window.localStorage.removeItem("leadlens-pending-onboarding");
+          })
           .catch((err) => {
             console.error("[Dashboard] Error continuing onboarding after Google sign-in:", err);
             setOnboardingError(err instanceof Error ? err.message : "Failed to generate campaign emails with Groq AI.");
@@ -146,8 +186,6 @@ export default function DashboardAppClient() {
             setLoadingWorkspace(false);
           });
         return;
-      } catch {
-        window.localStorage.removeItem("leadlens-pending-onboarding");
       }
     }
 
@@ -186,7 +224,7 @@ export default function DashboardAppClient() {
       })
       .catch((error) => console.error("[Dashboard] Error loading campaigns:", error))
       .finally(() => setLoadingWorkspace(false));
-  }, []);
+  }, [sessionStatus, router]);
 
   const handlePromptSubmitted = (prompt: string) => {
     setLeadGenerationPrompt(prompt);
@@ -199,14 +237,14 @@ export default function DashboardAppClient() {
     selectedLeads: Lead[];
     connectedEmail: string;
     provider: string;
-  }): Promise<{ sentCount: number; failedCount: number; total: number; status: Campaign["status"] }> => {
+  }): Promise<{ sentCount: number; failedCount: number; pendingCount: number; total: number; status: Campaign["status"] }> => {
     if (!activeCampaignId) throw new Error("Save the campaign before launching it.");
     const response = await fetch("/api/campaigns/launch", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ campaignId: activeCampaignId, ...payload }),
     });
-    const result = (await response.json()) as { status?: Campaign["status"]; sentCount?: number; failedCount?: number; total?: number; error?: string };
+    const result = (await response.json()) as { status?: Campaign["status"]; startedAt?: string; sentCount?: number; failedCount?: number; pendingCount?: number; total?: number; error?: string };
     if (!response.ok) throw new Error(result.error ?? "Unable to send campaign emails.");
 
     const selectedLeads = payload.selectedLeads;
@@ -226,6 +264,7 @@ export default function DashboardAppClient() {
           ? {
               ...campaign,
               status: result.status ?? "Failed",
+              startedAt: result.startedAt ?? campaign.startedAt,
               leadsCount: payload.selectedLeadIds.length,
               sentCount: result.sentCount ?? 0,
               failedCount: result.failedCount ?? 0,
@@ -239,6 +278,7 @@ export default function DashboardAppClient() {
     return {
       sentCount: result.sentCount ?? 0,
       failedCount: result.failedCount ?? 0,
+      pendingCount: result.pendingCount ?? 0,
       total: result.total ?? payload.selectedLeadIds.length,
       status: result.status ?? "Failed",
     };
@@ -274,11 +314,16 @@ export default function DashboardAppClient() {
     setGeneratedLeads(importedLeads);
     setSequenceLeads(importedLeads);
 
-    const firstCompany = importedLeads[0]?.company || "Target Accounts";
     const leadCount = importedLeads.length;
-    const campaignName = `CSV Outreach - ${firstCompany} (${leadCount} lead${leadCount === 1 ? "" : "s"})`;
-    const uniqueCompanies = Array.from(new Set(importedLeads.map((l) => l.company))).filter(Boolean);
+    const uniqueCompanies = Array.from(new Set(importedLeads.map((lead) => lead.company.trim())))
+      .filter((company) => company && company.toLowerCase() !== "enterprise");
     const companySummary = uniqueCompanies.slice(0, 3).join(", ") + (uniqueCompanies.length > 3 ? " and more" : "");
+    const contactSummary = importedLeads
+      .slice(0, 3)
+      .map((lead) => (/^Lead \d+$/i.test(lead.name.trim()) ? lead.email : lead.name || lead.email))
+      .filter(Boolean)
+      .join(", ");
+    const campaignName = companySummary || contactSummary;
     const prompt = `Outreach campaign for ${leadCount} imported prospects across ${companySummary}.`;
 
     const defaultSequence: Campaign["sequence"] = [
@@ -436,17 +481,16 @@ export default function DashboardAppClient() {
 
   if (loadingWorkspace || onboardingGenerating) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-white px-4 text-center text-sm text-muted" role="status">
-        <div className="flex items-center gap-3">
-          <span className="h-5 w-5 animate-spin rounded-full border-2 border-green border-t-transparent" />
-          <span className="font-semibold text-ink">
-            {onboardingGenerating ? "Generating personalized emails with Groq AI..." : "Opening LeadLens Workspace..."}
-          </span>
-        </div>
-        {onboardingGenerating && (
-          <p className="mt-2 text-xs text-muted max-w-sm">
-            Unlocking your audience and personalizing your 3-step outreach sequence...
-          </p>
+      <div className={`flex min-h-screen items-center justify-center px-4 text-center text-sm text-muted ${onboardingGenerating ? "bg-canvas" : "bg-white"}`} role="status">
+        {onboardingGenerating ? (
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-green-soft text-green shadow-2xs">
+            <Sparkles className="h-6 w-6 animate-pulse" />
+          </div>
+        ) : (
+          <div className="flex items-center gap-3">
+            <span className="h-5 w-5 animate-spin rounded-full border-2 border-green border-t-transparent" />
+            <span className="font-semibold text-ink">Opening LeadLens Workspace...</span>
+          </div>
         )}
       </div>
     );
@@ -463,7 +507,6 @@ export default function DashboardAppClient() {
             setStandaloneCampaignEntry(false);
             setCurrentModule(mod === "campaigns" ? "campaign" : mod);
           }}
-          onOpenPrompt={() => setIsPromptOverlayOpen(true)}
           onSwitchToLanding={() => router.push("/")}
         >
           {onboardingError && (
@@ -504,8 +547,8 @@ export default function DashboardAppClient() {
               onAddToConnect={handleAddToConnect}
               onLaunch={handleCampaignLaunched}
               onNavigate={(mod) => setCurrentModule(mod === "campaigns" ? "campaign" : mod)}
-              onSelectCampaign={handleSelectCampaign}
               onImportCsvLeads={handleImportCsvLeads}
+              activeCampaignOnly={currentModule === "campaigns"}
             />
           )}
 
@@ -559,7 +602,6 @@ export default function DashboardAppClient() {
             setStandaloneCampaignEntry(false);
             setCurrentModule(mod === "campaigns" ? "campaign" : mod);
           }}
-          onOpenPrompt={() => setIsPromptOverlayOpen(true)}
           onSwitchToLanding={() => router.push("/")}
         >
           <CampaignsModule
@@ -571,7 +613,6 @@ export default function DashboardAppClient() {
             onAddToConnect={handleAddToConnect}
             onLaunch={handleCampaignLaunched}
             onNavigate={(mod) => setCurrentModule(mod === "campaigns" ? "campaign" : mod)}
-            onSelectCampaign={handleSelectCampaign}
             onImportCsvLeads={handleImportCsvLeads}
           />
         </AppShell>

@@ -10,17 +10,13 @@ import {
   Building2,
   Users,
   ArrowRight,
-  Check,
   RotateCcw,
-  ShieldCheck,
-  ChevronRight,
   ChevronDown,
   ChevronUp,
   X,
   Layers,
   Award,
   Mail,
-  Sparkles,
   Globe,
   ExternalLink,
 } from "lucide-react";
@@ -44,6 +40,7 @@ interface LeadManagementViewProps {
   showContinue?: boolean;
   showFilters?: boolean;
   readOnly?: boolean;
+  campaignSetupScreen?: boolean;
 }
 
 type SortKey = "match" | "name" | "company";
@@ -158,6 +155,7 @@ export default function LeadManagementView({
   showContinue = true,
   showFilters = true,
   readOnly = false,
+  campaignSetupScreen = false,
 }: LeadManagementViewProps) {
   // Global search & sort
   const [searchQuery, setSearchQuery] = useState("");
@@ -635,7 +633,7 @@ export default function LeadManagementView({
     (selectedHeadquarters.size > 0 ? 1 : 0);
 
   return (
-    <div className="space-y-4 text-ink">
+    <div className={`${campaignSetupScreen ? "w-full min-w-0" : ""} space-y-4 text-ink`}>
       {/* Top Search & Filter Bar */}
       <div className={`${showFilters ? "flex" : "hidden"} w-full flex-col gap-3 sm:flex-row sm:items-center`}>
         <div className="relative min-w-0 flex-1">
@@ -746,13 +744,16 @@ export default function LeadManagementView({
       )}
 
       {/* Layout Grid: Sidebar Filters & Leads Table */}
-      <div className="flex flex-col items-start gap-5 lg:flex-row">
+      <div className={campaignSetupScreen
+        ? "grid w-full min-w-0 gap-4 lg:grid-cols-[minmax(15rem,18rem)_minmax(0,1fr)]"
+        : "flex flex-col items-start gap-5 lg:flex-row"}
+      >
         {/* ========================================================= */}
         {/* FILTER SIDEBAR                                            */}
         {/* ========================================================= */}
         <aside
           className={showFilters
-            ? `${filtersOpen ? "block" : "hidden"} w-full shrink-0 space-y-4 rounded-3xl border border-line bg-white p-5 text-xs shadow-xs lg:block lg:w-80`
+            ? `${filtersOpen ? "block" : "hidden"} w-full shrink-0 space-y-4 rounded-3xl border border-line bg-white p-5 text-xs shadow-xs ${campaignSetupScreen ? "lg:block" : "lg:block lg:w-80"}`
             : "hidden"}
         >
           {/* Header */}
@@ -1159,7 +1160,7 @@ export default function LeadManagementView({
           )}
 
           {/* Bottom Table Actions */}
-          <div className="flex flex-col justify-between gap-4 border-t border-line bg-canvas p-4 sm:flex-row sm:items-center sm:p-5">
+          <div className={`flex flex-col gap-4 border-t border-line bg-canvas p-4 sm:flex-row sm:items-center sm:p-5 ${campaignSetupScreen ? "sm:justify-end" : "sm:justify-between"}`}>
             {readOnly ? (
               <>
                 <p className="text-sm font-medium text-muted">{leads.length} imported records</p>
@@ -1177,16 +1178,18 @@ export default function LeadManagementView({
               </>
             ) : (
               <>
-                <div>
-                  <div className="text-sm font-bold text-ink">
-                    <strong className="text-green font-extrabold">{selectedLeadIds.size}</strong> of{" "}
-                    {leads.length} leads selected
+                {!campaignSetupScreen && (
+                  <div>
+                    <div className="text-sm font-bold text-ink">
+                      <strong className="text-green font-extrabold">{selectedLeadIds.size}</strong> of{" "}
+                      {leads.length} leads selected
+                    </div>
+                    <p className="text-[11px] text-muted">
+                      Selected prospects will receive personalized outreach sequences in this campaign.
+                    </p>
                   </div>
-                  <p className="text-[11px] text-muted">
-                    Selected prospects will receive personalized outreach sequences in this campaign.
-                  </p>
-                </div>
-                <div className="flex flex-wrap items-center justify-end gap-3">
+                )}
+                <div className={`flex flex-wrap items-center justify-end gap-3 ${campaignSetupScreen ? "w-full" : ""}`}>
                   <button
                     type="button"
                     onClick={() => {

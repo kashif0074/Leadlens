@@ -86,20 +86,23 @@ export async function POST(request: NextRequest) {
           {
             step: 1,
             delayDays: 0,
+            intervalDays: 0,
             subject: "A question about {{company}}",
             body: `Hi {{first_name}},\n\nI'm reaching out about ${prompt} given your {{job_title}} role at {{company}}. Would a brief conversation be useful?\n\nRegards,`,
             manuallyEdited: false,
           },
           {
             step: 2,
-            delayDays: 3,
+            delayDays: 7,
+            intervalDays: 7,
             subject: "One more thought for {{company}}",
             body: `Hi {{first_name}},\n\nOne more note about ${prompt}. If this is relevant to your work at {{company}}, would you be open to a short conversation?\n\nRegards,`,
             manuallyEdited: false,
           },
           {
             step: 3,
-            delayDays: 5,
+            delayDays: 10,
+            intervalDays: 3,
             subject: "Should I close the loop, {{first_name}}?",
             body: `Hi {{first_name}},\n\nIs ${prompt} a priority for your team at {{company}}? If not, no problem; I won't follow up again.\n\nRegards,`,
             manuallyEdited: false,
@@ -122,7 +125,7 @@ export async function POST(request: NextRequest) {
       }));
     }
 
-    const name = body.name?.trim() || prompt.replace(/\s+/g, " ").slice(0, 48) || "Outbound campaign";
+    const name = body.name?.trim() || prompt.replace(/\s+/g, " ").slice(0, 48);
 
     const data = {
       name,

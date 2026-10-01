@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "worker": "tsx workers/processors/emailWorker.ts"
+    "worker": "tsx workers/processors/emailQueueWorker.ts"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.3",

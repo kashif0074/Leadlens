@@ -89,7 +89,6 @@ export async function findEmailsByDomain(domain: string): Promise<SnovEmailResul
 
   // Directory/aggregator domains ke liye API call hi mat karo
   if (isAggregatorDomain(cleanDomain)) {
-    console.warn(`[Snov.io] Skipping aggregator domain: ${cleanDomain}`);
     return [];
   }
 
@@ -113,6 +112,10 @@ export async function findEmailsByDomain(domain: string): Promise<SnovEmailResul
     });
     clearTimeout(timeout);
 
+    if (res.status === 404) {
+      return [];
+    }
+
     if (!res.ok) {
       console.warn(`[Snov.io] Domain lookup returned HTTP ${res.status} for ${cleanDomain}`);
       return [];
@@ -121,14 +124,24 @@ export async function findEmailsByDomain(domain: string): Promise<SnovEmailResul
     const data = await res.json();
     const emails = data?.emails || [];
 
-    return emails.map((e: any) => ({
-      email: e.email || null,
-      firstName: e.firstName || null,
-      lastName: e.lastName || null,
-      position: e.position || null,
-      status: e.emailStatus || (e.status === "valid" ? "valid" : "not_verified"),
-      confidence: typeof e.confidence === "number" ? e.confidence : 85,
-    }));
+    return emails.map(
+      (e: {
+        email?: string;
+        firstName?: string;
+        lastName?: string;
+        position?: string;
+        emailStatus?: string;
+        status?: string;
+        confidence?: number;
+      }) => ({
+        email: e.email || null,
+        firstName: e.firstName || null,
+        lastName: e.lastName || null,
+        position: e.position || null,
+        status: e.emailStatus || (e.status === "valid" ? "valid" : "not_verified"),
+        confidence: typeof e.confidence === "number" ? e.confidence : 85,
+      }),
+    );
   } catch (err) {
     console.warn(`[Snov.io] Error looking up domain ${cleanDomain}:`, err);
     return [];

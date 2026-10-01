@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Mail, Send, Server } from "lucide-react";
 
 type GmailAccount = { id: string; email: string; displayName: string; status: string };
 type GmailOAuthMessage = {
@@ -65,6 +66,13 @@ export function ConnectGmail({ campaignId, connectedEmail, onConnected, onDiscon
 
   const currentAccount = accounts.find((account) => account.email.toLowerCase() === connectedEmail.toLowerCase());
   const selectedAccount = accounts.find((account) => account.id === selectedAccountId);
+  const connectionLabel = loadingAccounts && connectedEmail
+    ? "Checking..."
+    : currentAccount?.status === "connected"
+      ? "Connected"
+      : connectedEmail
+        ? "Reconnect required"
+        : "Disconnected";
 
   function connectGmail() {
     if (!campaignId) {
@@ -121,78 +129,101 @@ export function ConnectGmail({ campaignId, connectedEmail, onConnected, onDiscon
   }
 
   return (
-    <div className="mt-4 space-y-4">
-      {connectedEmail && loadingAccounts ? (
-        <p className="rounded-xl border border-line bg-canvas p-4 text-sm text-muted" role="status">Checking Gmail connection...</p>
-      ) : connectedEmail && currentAccount?.status === "connected" ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-green/20 bg-green-soft p-4">
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-wide text-green-dark">Connected</p>
-            <p className="mt-1 text-sm font-semibold text-ink">{connectedEmail}</p>
+    <div className="mt-5 space-y-5">
+      <div className="grid gap-4 md:grid-cols-3">
+        <section className="flex min-h-64 flex-col rounded-2xl border border-green/20 bg-white p-5 shadow-2xs">
+          <Mail className="h-6 w-6 text-green" aria-hidden="true" />
+          <h3 className="mt-5 text-base font-bold text-ink">Google Workspace / Gmail</h3>
+          <p className="mt-2 text-sm leading-relaxed text-muted">Connect a managed Google inbox and verify sending readiness.</p>
+          {currentAccount?.status === "connected" && connectedEmail && (
+            <p className="mt-3 break-all text-sm font-semibold text-ink" role="status">{connectedEmail}</p>
+          )}
+          {connectedEmail && currentAccount?.status !== "connected" && !loadingAccounts && (
+            <p className="mt-3 text-xs text-amber-800">This account needs Gmail authorization again.</p>
+          )}
+          <div className="mt-auto flex items-center justify-between gap-3 pt-5">
+            <span className={`rounded-full px-3 py-1 text-xs font-bold ${currentAccount?.status === "connected" ? "bg-green-soft text-green-dark" : "bg-gold-soft text-gold"}`}>
+              {connectionLabel}
+            </span>
+            {currentAccount?.status === "connected" ? (
+              <button type="button" className="btn btn-secondary text-xs" disabled={loading} onClick={disconnect}>
+                Disconnect
+              </button>
+            ) : (
+              <button type="button" className="btn btn-primary text-xs" disabled={loading} onClick={connectGmail}>
+                {loading ? "Connecting..." : "Connect"}
+              </button>
+            )}
           </div>
-          <button type="button" className="btn btn-secondary text-xs" disabled={loading} onClick={disconnect}>
-            Disconnect Gmail
-          </button>
-        </div>
-      ) : connectedEmail ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-          <div>
-            <strong>Reconnect required</strong>
-            <p className="mt-1">{connectedEmail} needs Gmail authorization again before sending.</p>
+        </section>
+
+        <section className="flex min-h-64 flex-col rounded-2xl border border-line bg-white p-5 shadow-2xs">
+          <Send className="h-6 w-6 text-green" aria-hidden="true" />
+          <h3 className="mt-5 text-base font-bold text-ink">Microsoft Outlook / Microsoft 365</h3>
+          <p className="mt-2 text-sm leading-relaxed text-muted">Connect an organization inbox with a secure setup flow.</p>
+          <div className="mt-auto flex items-center justify-between gap-3 pt-5">
+            <span className="rounded-full bg-gold-soft px-3 py-1 text-xs font-bold text-gold">Disconnected</span>
+            <button type="button" className="btn btn-secondary text-xs">Connect</button>
           </div>
-          {currentAccount && (
-            <button type="button" className="btn btn-secondary text-xs" disabled={loading} onClick={disconnect}>
-              Disconnect Gmail
+        </section>
+
+        <section className="flex min-h-64 flex-col rounded-2xl border border-line bg-white p-5 shadow-2xs">
+          <Server className="h-6 w-6 text-green" aria-hidden="true" />
+          <h3 className="mt-5 text-base font-bold text-ink">Other email provider</h3>
+          <p className="mt-2 text-sm leading-relaxed text-muted">Use guided SMTP or provider-specific connection instructions.</p>
+          <div className="mt-auto flex items-center justify-between gap-3 pt-5">
+            <span className="rounded-full bg-gold-soft px-3 py-1 text-xs font-bold text-gold">Disconnected</span>
+            <button type="button" className="btn btn-secondary text-xs">Connect</button>
+          </div>
+        </section>
+      </div>
+
+      <details className="rounded-xl border border-line bg-white">
+        <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-ink">Gmail account settings</summary>
+        <div className="grid gap-4 border-t border-line p-4 sm:grid-cols-2">
+          {(loadingAccounts || accounts.length > 0) && (
+            <label className="block text-xs font-bold">
+              Saved Gmail account
+              <select
+                className="input mt-1.5"
+                value={selectedAccountId}
+                onChange={(event) => {
+                  const accountId = event.target.value;
+                  setSelectedAccountId(accountId);
+                  setDisplayName(accounts.find((account) => account.id === accountId)?.displayName ?? "");
+                }}
+                disabled={loadingAccounts || loading}
+              >
+                <option value="">Connect a different account</option>
+                {accounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.email}{account.status !== "connected" ? " · Reconnect required" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          <label className="block text-xs font-bold">
+            Sender name
+            <input
+              className="input mt-1.5"
+              type="text"
+              autoComplete="name"
+              maxLength={80}
+              value={displayName}
+              onChange={(event) => setDisplayName(event.target.value)}
+              placeholder="Your name or business name"
+            />
+          </label>
+
+          {selectedAccount?.status === "connected" && selectedAccount.email !== connectedEmail && (
+            <button className="btn btn-secondary text-xs sm:col-span-2 sm:justify-self-start" type="button" disabled={loading} onClick={useSavedAccount}>
+              {loading ? "Saving sender..." : `Use ${selectedAccount.email} for this campaign`}
             </button>
           )}
         </div>
-      ) : null}
-
-      {(loadingAccounts || accounts.length > 0) && (
-        <label className="block text-xs font-bold">
-          Saved Gmail account
-          <select
-            className="input mt-1.5"
-            value={selectedAccountId}
-            onChange={(event) => {
-              const accountId = event.target.value;
-              setSelectedAccountId(accountId);
-              setDisplayName(accounts.find((account) => account.id === accountId)?.displayName ?? "");
-            }}
-            disabled={loadingAccounts || loading}
-          >
-            <option value="">Connect a different account</option>
-            {accounts.map((account) => (
-              <option key={account.id} value={account.id}>
-                {account.email}{account.status !== "connected" ? " · Reconnect required" : ""}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
-
-      <label className="block text-xs font-bold">
-        Sender name
-        <input
-          className="input mt-1.5"
-          type="text"
-          autoComplete="name"
-          maxLength={80}
-          value={displayName}
-          onChange={(event) => setDisplayName(event.target.value)}
-          placeholder="Your name or business name"
-        />
-      </label>
-
-      {selectedAccount?.status === "connected" && selectedAccount.email !== connectedEmail && (
-        <button className="btn btn-secondary w-full text-xs" type="button" disabled={loading} onClick={useSavedAccount}>
-          {loading ? "Saving sender..." : `Use ${selectedAccount.email} for this campaign`}
-        </button>
-      )}
-
-      <button className="btn btn-primary w-full text-xs" type="button" disabled={loading} onClick={connectGmail}>
-        {loading ? "Connecting Gmail..." : connectedEmail ? "Reconnect Gmail" : "Connect Gmail"}
-      </button>
+      </details>
 
       {error && <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700" role="alert">{error}</p>}
     </div>

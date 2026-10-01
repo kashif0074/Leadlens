@@ -57,16 +57,19 @@ the sending-domain authentication. For a Google Workspace custom domain, the
 domain owner must authorize Google in SPF, enable DKIM signing in the Workspace
 admin console and publish Google's DKIM selector, and publish a DMARC record
 for the visible From domain. Keep a single SPF record and merge authorized
-senders into it. DNS hosting and propagation are outside LeadLens; the app does
-not inspect or verify SPF, DKIM, or DMARC records.
+senders into it. Before launch, LeadLens checks SPF authorization for Google,
+common or configured DKIM selectors, and DMARC. It cannot publish records or
+activate DKIM; those actions require domain administrator access. Set
+`GMAIL_DKIM_SELECTOR` if your Workspace domain uses a nonstandard selector.
 
 Set `NEXTAUTH_URL` to the public HTTPS application URL in production. Campaign
 messages include a one-click unsubscribe link, and LeadLens suppresses opted-out
 addresses for that user across their campaigns. Do not send unsolicited mail;
 collect only contacts you have an appropriate legal basis to contact. The
 per-launch and rolling 24-hour caps reduce volume spikes but cannot guarantee
-Primary Inbox placement. Gmail SMTP confirms acceptance or immediate rejection;
-this app does not receive later bounce notifications from Gmail, so monitor the
+Primary Inbox placement. Gmail decides whether messages appear in Primary,
+Promotions, or Spam. Gmail API acceptance does not confirm later delivery; this
+app does not receive later bounce notifications from Gmail, so monitor the
 mailbox for post-acceptance bounces.
 
 ## Validation
@@ -77,9 +80,23 @@ npx tsc --noEmit
 npm run build
 ```
 
-## Email worker and Upstash Redis
+## Persistent email delivery worker
 
-The BullMQ worker uses the Redis TCP endpoint, not the Upstash REST URL. Set a
+Campaign deliveries are stored in MySQL before sending, so pending messages
+survive web-server restarts. The worker claims one delivery at a time, applies
+per-sender pacing and retry backoff, and uses the connected Gmail OAuth account.
+Run it alongside the Next.js app in production:
+
+```bash
+npm run worker
+```
+
+The app server also polls the database queue while running. The standalone
+worker is recommended when web instances may scale down between requests.
+
+## BullMQ workers and Upstash Redis
+
+Other BullMQ workers use the Redis TCP endpoint, not the Upstash REST URL. Set a
 fresh token in `.env` after creating or rotating it in the Upstash
 console:
 

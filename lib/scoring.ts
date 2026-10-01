@@ -137,6 +137,10 @@ export function generateMatchReason(
   const role = determineLeadRole(jobTitle);
   const firstName = leadName.split(" ")[0];
 
+  if (campaignPrompt && campaignPrompt.trim()) {
+    return `${firstName} is a relevant ${role.toLowerCase()} at ${company} aligned with campaign goals in ${industry}.`;
+  }
+
   if (role === "Executive") {
     return `${firstName} is a primary decision-maker at ${company}, actively scaling ${industry} operations in ${city}.`;
   }

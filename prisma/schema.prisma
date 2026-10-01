@@ -105,6 +105,7 @@ model Campaign {
   emailAccountId     String?         @map("email_account_id")
   sentCount          Int             @default(0) @map("sent_count")
   failedCount        Int             @default(0) @map("failed_count")
+  startedAt          DateTime?       @map("started_at")
   createdAt          DateTime        @default(now()) @map("created_at")
   updatedAt          DateTime        @updatedAt @map("updated_at")
   userId             String?         @map("user_id")
@@ -127,10 +128,12 @@ model EmailDelivery {
   senderEmail   String?        @map("sender_email")
   subject       String         @db.Text
   body          String         @db.Text
-  status        String         @default("Sending")
+  status        String         @default("Pending")
   messageId     String?        @map("message_id")
   gmailThreadId String?        @map("gmail_thread_id")
   error         String?        @db.Text
+  attemptCount  Int            @default(0) @map("attempt_count")
+  nextAttemptAt DateTime?      @map("next_attempt_at")
   sentAt        DateTime?      @map("sent_at")
   createdAt     DateTime       @default(now()) @map("created_at")
   updatedAt     DateTime       @updatedAt @map("updated_at")
@@ -139,6 +142,7 @@ model EmailDelivery {
 
   @@unique([campaignId, leadId, step])
   @@index([campaignId, status])
+  @@index([status, nextAttemptAt, createdAt])
   @@map("email_deliveries")
 }
 

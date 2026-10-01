@@ -17,14 +17,15 @@ import {
   FileText,
   BarChart3,
   Inbox,
-  RotateCcw,
   Check,
   Download,
   AlertCircle,
+  Calendar,
 } from "lucide-react";
 import type { AppModule, Campaign, Lead, SetupStep } from "../../types";
 import LeadManagementView from "../leads/LeadManagementView";
 import { ConnectGmail } from "./ConnectGmail";
+import FollowUpScheduleControl from "@/components/common/FollowUpScheduleControl";
 import { determineLeadRole, determineLeadFunction } from "../../lib/scoring";
 
 export interface CampaignLaunchContext {
@@ -43,10 +44,10 @@ interface CampaignsModuleProps {
   leads: Lead[];
   onOpenNewCampaign: () => void;
   onAddToConnect: () => void;
-  onLaunch: (payload: { selectedLeadIds: string[]; selectedLeads: Lead[]; connectedEmail: string; provider: string }) => Promise<{ sentCount: number; failedCount: number; total: number; status: Campaign["status"] }>;
+  onLaunch: (payload: { selectedLeadIds: string[]; selectedLeads: Lead[]; connectedEmail: string; provider: string }) => Promise<{ sentCount: number; failedCount: number; pendingCount: number; total: number; status: Campaign["status"] }>;
   onNavigate?: (module: AppModule) => void;
-  onSelectCampaign?: (campaignId: string) => void;
   onImportCsvLeads?: (leads: Lead[]) => void;
+  activeCampaignOnly?: boolean;
 }
 
 const steps = ["Leads", "Connect inbox", "Send emails", "Sending", "Warmup", "Review", "Launch"];
@@ -54,12 +55,106 @@ const steps = ["Leads", "Connect inbox", "Send emails", "Sending", "Warmup", "Re
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 type CampaignEmail = Campaign["sequence"][number];
 
+function isCampaignActive(campaign: Campaign): boolean {
+  return campaign.status === "Live" || campaign.status === "Partially sent";
+}
+
 function createEmailSequence(campaign?: Campaign): CampaignEmail[] {
   const saved = campaign?.sequence ?? [];
   return Array.isArray(saved) && saved.length > 0
-    ? saved.map((email, index) => ({ ...email, step: index + 1 }))
+    ? saved.map((email, index) => ({
+        ...email,
+        step: index + 1,
+        delayDays:
+          typeof email.delayDays === "number"
+            ? email.delayDays
+            : index === 0
+              ? 0
+              : index === 1
+                ? 7
+                : 10,
+        intervalDays:
+          typeof email.intervalDays === "number"
+            ? email.intervalDays
+            : index === 0
+              ? 0
+              : index === 1
+                ? (typeof email.delayDays === "number" ? email.delayDays : 7)
+                : (typeof email.delayDays === "number" && typeof saved[1]?.delayDays === "number" ? Math.max(1, email.delayDays - saved[1].delayDays) : 3),
+      }))
     : [];
 }
+
+function getScheduleLabel(email: CampaignEmail, index: number, sequence: CampaignEmail[]): string {
+  if (index === 0) return "Send immediately after launch";
+
+  if (index === 1) {
+    const days = email.intervalDays ?? email.delayDays ?? 7;
+    if (email.scheduledAt) {
+      try {
+        const date = new Date(email.scheduledAt);
+        const timeStr = email.scheduledTime ? ` at ${email.scheduledTime}` : "";
+        return `Scheduled for ${date.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}${timeStr} (${days === 7 ? "1 week" : `${days} day${days === 1 ? "" : "s"}`} after initial)`;
+      } catch {}
+    }
+    if (days === 7) return "1 week (7 days) after Initial Email";
+    if (days === 14) return "2 weeks (14 days) after Initial Email";
+    return `${days} day${days === 1 ? "" : "s"} after Initial Email`;
+  }
+
+  if (index === 2) {
+    const fu1Days = sequence[1]?.intervalDays ?? sequence[1]?.delayDays ?? 7;
+    const fu2Interval = email.intervalDays ?? (email.delayDays && email.delayDays > fu1Days ? email.delayDays - fu1Days : 3);
+    const totalDays = fu1Days + fu2Interval;
+
+    if (email.scheduledAt) {
+      try {
+        const date = new Date(email.scheduledAt);
+        const timeStr = email.scheduledTime ? ` at ${email.scheduledTime}` : "";
+        return `Scheduled for ${date.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}${timeStr} (${fu2Interval} day${fu2Interval === 1 ? "" : "s"} after Follow-up 1)`;
+      } catch {}
+    }
+    if (fu2Interval === 7) return `1 week (7 days) after Follow-up 1 (Total: ${totalDays} days from launch)`;
+    return `${fu2Interval} day${fu2Interval === 1 ? "" : "s"} after Follow-up 1 (Total: ${totalDays} days from launch)`;
+  }
+
+  return `${email.delayDays || 0} days after previous email`;
+}
+
+function getExpectedDeliveryDate(email: CampaignEmail, index: number, sequence: CampaignEmail[]): string {
+  if (index === 0) return "Immediately after launch";
+
+  const now = new Date();
+  if (index === 1) {
+    if (email.scheduledAt) {
+      try {
+        const d = new Date(email.scheduledAt);
+        return d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+      } catch {}
+    }
+    const days = email.intervalDays ?? email.delayDays ?? 7;
+    const target = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+    return target.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+  }
+
+  if (index === 2) {
+    const fu1Days = sequence[1]?.intervalDays ?? sequence[1]?.delayDays ?? 7;
+    const fu2Interval = email.intervalDays ?? (email.delayDays && email.delayDays > fu1Days ? email.delayDays - fu1Days : 3);
+    const totalDays = fu1Days + fu2Interval;
+    if (email.scheduledAt) {
+      try {
+        const d = new Date(email.scheduledAt);
+        return d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+      } catch {}
+    }
+    const target = new Date(now.getTime() + totalDays * 24 * 60 * 60 * 1000);
+    return `${target.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" })} (${fu2Interval} days after Follow-up 1)`;
+  }
+
+  return "";
+}
+
+
 
 export const REQUIRED_CSV_FORMAT_MESSAGE =
   "Please upload a CSV file with this format: Person | Role | Company | Email | LinkedIn Profile | Industry | Location";
@@ -205,6 +300,8 @@ export function validateAndParseCsv(
     leads.push({
       id: `lead-csv-${now}-${i}-${Math.random().toString(36).slice(2, 6)}`,
       name: name || `Lead ${i}`,
+      firstName,
+      lastName,
       jobTitle,
       role,
       function: fn,
@@ -250,10 +347,22 @@ export default function CampaignsModule({
   onAddToConnect,
   onLaunch,
   onNavigate,
-  onSelectCampaign,
   onImportCsvLeads,
+  activeCampaignOnly = false,
 }: CampaignsModuleProps) {
-  const campaign = campaigns.find((item) => item.id === activeCampaignId) ?? campaigns[0];
+  const seenCampaignNames = new Set<string>();
+  const activeCampaigns = campaigns
+    .filter(isCampaignActive)
+    .sort((left, right) => new Date(right.startedAt ?? 0).getTime() - new Date(left.startedAt ?? 0).getTime())
+    .filter((item) => {
+      const key = (item.displayName ?? item.name).trim().replace(/\s+/g, " ").toLowerCase();
+      if (!key || seenCampaignNames.has(key)) return false;
+      seenCampaignNames.add(key);
+      return true;
+    });
+  const campaign = activeCampaignOnly
+    ? activeCampaigns[0]
+    : campaigns.find((item) => item.id === activeCampaignId) ?? campaigns[0];
   const effectiveLeads =
     leads && leads.length > 0
       ? leads
@@ -269,10 +378,11 @@ export default function CampaignsModule({
   const [warmupAcknowledged, setWarmupAcknowledged] = useState(() => campaign?.status === "Live");
   const [toast, setToast] = useState("");
   const [launchError, setLaunchError] = useState("");
-  const [launchResult, setLaunchResult] = useState<{ sentCount: number; failedCount: number; total: number } | null>(null);
+  const [launchResult, setLaunchResult] = useState<{ sentCount: number; failedCount: number; pendingCount: number; total: number } | null>(null);
   const [isLaunching, setIsLaunching] = useState(false);
   const [emailSequence, setEmailSequence] = useState<CampaignEmail[]>(() => createEmailSequence(campaign));
   const [editingEmail, setEditingEmail] = useState<number | null>(null);
+  const [schedulingStep, setSchedulingStep] = useState<number | null>(null);
   const [regenerationPrompt, setRegenerationPrompt] = useState("");
   const [pendingSequence, setPendingSequence] = useState<CampaignEmail[] | null>(null);
   const [pendingPersonalizedEmails, setPendingPersonalizedEmails] = useState<Campaign["personalizedEmails"]>();
@@ -282,7 +392,6 @@ export default function CampaignsModule({
   // New Campaign Choice Modal & CSV Import Modal States
   const [showNewCampaignModal, setShowNewCampaignModal] = useState(false);
   const [showCsvModal, setShowCsvModal] = useState(false);
-  const [csvRawText, setCsvRawText] = useState("");
   const [csvError, setCsvError] = useState("");
   const [csvParsedPreview, setCsvParsedPreview] = useState<Lead[]>([]);
 
@@ -306,19 +415,22 @@ export default function CampaignsModule({
   }, [campaign?.id, campaign?.sequence]);
 
   useEffect(() => {
-    if (campaign?.selectedLeadIds && Array.isArray(campaign.selectedLeadIds) && (!launchContext?.selectedLeadIds || launchContext.selectedLeadIds.length === 0)) {
-      setSelectedIds(new Set(campaign.selectedLeadIds as string[]));
-    }
-    if (campaign?.connectedEmail) {
-      setEmail(campaign.connectedEmail);
-    }
-    if (campaign?.provider) {
-      setProvider(campaign.provider);
-    }
-    if (campaign?.status === "Live") {
-      setSendingSaved(true);
-      setWarmupAcknowledged(true);
-    }
+    const syncCampaignTimer = window.setTimeout(() => {
+      if (campaign?.selectedLeadIds && Array.isArray(campaign.selectedLeadIds) && (!launchContext?.selectedLeadIds || launchContext.selectedLeadIds.length === 0)) {
+        setSelectedIds(new Set(campaign.selectedLeadIds as string[]));
+      }
+      if (campaign?.connectedEmail) {
+        setEmail(campaign.connectedEmail);
+      }
+      if (campaign?.provider) {
+        setProvider(campaign.provider);
+      }
+      if (campaign?.status === "Live") {
+        setSendingSaved(true);
+        setWarmupAcknowledged(true);
+      }
+    }, 0);
+    return () => window.clearTimeout(syncCampaignTimer);
   }, [campaign?.id, campaign?.selectedLeadIds, campaign?.connectedEmail, campaign?.provider, campaign?.status, launchContext]);
 
   const notify = (message: string) => {
@@ -327,9 +439,9 @@ export default function CampaignsModule({
   };
 
   const canReview = selectedIds.size > 0 && Boolean(email) && sendingSaved && warmupAcknowledged;
-  const activeCampaignName = campaign?.name ?? "New campaign";
+  const activeCampaignName = campaign?.displayName ?? campaign?.name ?? "New campaign";
   const brief = launchContext?.prompt ?? campaign?.brief ?? "";
-  const launched = campaign?.status === "Live" || campaign?.status === "Partially sent";
+  const launched = campaign ? isCampaignActive(campaign) : false;
   const liveCampaigns = campaigns.filter((c) => c.status === "Live");
   const importedOnly = effectiveLeads.length > 0 && effectiveLeads.every((lead) => lead.importSource === "csv");
 
@@ -395,7 +507,7 @@ export default function CampaignsModule({
         connectedEmail: email.trim(),
         provider,
       });
-      setLaunchResult({ sentCount: result.sentCount, failedCount: result.failedCount, total: result.total });
+      setLaunchResult({ sentCount: result.sentCount, failedCount: result.failedCount, pendingCount: result.pendingCount, total: result.total });
     } catch (error) {
       setLaunchError(error instanceof Error ? error.message : "Unable to launch campaign.");
     } finally {
@@ -480,7 +592,6 @@ export default function CampaignsModule({
     const reader = new FileReader();
     reader.onload = (e) => {
       const content = (e.target?.result as string) || "";
-      setCsvRawText(content);
       const result = validateAndParseCsv(file, content);
       if (!result.valid || !result.leads.length) {
         setCsvError(result.errorMessage || REQUIRED_CSV_FORMAT_MESSAGE);
@@ -513,7 +624,7 @@ export default function CampaignsModule({
   // ============================================================
   // EMPTY STATE (NO CAMPAIGNS & NO LEADS)
   // ============================================================
-  if (!campaign && effectiveLeads.length === 0) {
+  if (!campaign && (activeCampaignOnly || effectiveLeads.length === 0)) {
     return (
       <div className="surface panel max-w-3xl space-y-4">
         <p className="eyebrow">Campaigns</p>
@@ -638,7 +749,7 @@ export default function CampaignsModule({
               <p className="text-[10px] font-bold tracking-wider text-green-soft uppercase">
                 Active Outbound Workflow
               </p>
-              <h2 className="mt-0.5 font-serif text-xl font-bold">{campaign.name}</h2>
+              <h2 className="mt-0.5 font-serif text-xl font-bold">{campaign.displayName ?? campaign.name}</h2>
             </div>
             <span className="flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-xs font-bold text-white shadow-xs">
               <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
@@ -758,59 +869,6 @@ export default function CampaignsModule({
           </div>
         </div>
 
-        {/* Portfolio Table */}
-        <section className="surface rounded-3xl p-6 border border-line bg-white shadow-xs">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-4">
-            <div>
-              <p className="eyebrow">All Campaigns</p>
-              <h2 className="mt-1 font-serif text-xl font-bold text-ink">Campaign Portfolio</h2>
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowNewCampaignModal(true)}
-              className="text-xs font-bold text-green hover:underline cursor-pointer flex items-center gap-1"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              <span>Create another campaign</span>
-            </button>
-          </div>
-
-          <div className="mt-4 grid gap-3 lg:grid-cols-2">
-            {campaigns.map((item) => {
-              const isItemActive = item.id === campaign.id;
-              const isItemLive = item.status === "Live";
-
-              return (
-                <div
-                  key={item.id}
-                  onClick={() => {
-                    onSelectCampaign?.(item.id);
-                  }}
-                  className={`rounded-2xl border p-4 text-left transition-all cursor-pointer ${
-                    isItemActive
-                      ? "border-green bg-green-soft/30 shadow-xs"
-                      : "border-line bg-canvas hover:border-green/60 hover:bg-white"
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="font-bold text-ink text-sm">{item.name}</span>
-                    <span className={`status ${isItemLive ? "good" : "warn"}`}>
-                      {isItemLive ? "Live" : item.status || "Draft"}
-                    </span>
-                  </div>
-                  <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-muted font-normal">
-                    {item.brief || "No brief description"}
-                  </p>
-                  <div className="mt-4 flex items-center justify-between text-xs text-muted border-t border-line/60 pt-2">
-                    <span>{item.leadsCount} leads</span>
-                    <span>{item.sentCount} sent · {item.failedCount ?? 0} failed</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-
         {/* Choice Modal */}
         {showNewCampaignModal && (
           <NewCampaignChoiceModal
@@ -845,25 +903,8 @@ export default function CampaignsModule({
   // ============================================================
   return (
     <div className="relative w-full space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-4 border-b border-line pb-4">
-        <div className="min-w-0">
-          <p className="text-[11px] font-bold tracking-[0.13em] text-green uppercase">Campaign Setup Workspace</p>
-          <h1 className="mt-2 font-serif text-3xl font-bold tracking-tight text-ink">{activeCampaignName}</h1>
-          {brief && <p className="mt-2 max-w-3xl text-sm text-muted">Built around your brief: “{brief}”</p>}
-        </div>
-        <div className="flex items-center gap-2">
-          <span className={`rounded-full px-3 py-1 text-xs font-bold ${launched ? "bg-green-soft text-green" : "bg-gold-soft text-gold"}`}>
-            {launched ? "Campaign live" : campaign?.status ?? "Draft"}
-          </span>
-          <button
-            className="btn btn-primary text-xs flex items-center gap-1.5"
-            type="button"
-            onClick={() => setShowNewCampaignModal(true)}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            <span>New campaign</span>
-          </button>
-        </div>
+      <div className="border-b border-line pb-4">
+        <h1 className="font-serif text-3xl font-bold tracking-tight text-ink">{activeCampaignName}</h1>
       </div>
 
       <div className="flex gap-1 overflow-x-auto rounded-2xl border border-line bg-white p-1">
@@ -887,22 +928,6 @@ export default function CampaignsModule({
             <div>
               <p className="eyebrow">{importedOnly ? "Imported leads" : "All leads"}</p>
               <h2 className="mt-1 text-2xl font-bold">{importedOnly ? "Imported leads" : "Review your matching audience."}</h2>
-              <p className="mt-2 text-sm text-muted">
-                {importedOnly
-                  ? "Showing the records from your CSV import."
-                  : "Search and filter the loaded lead list, then select who belongs in this campaign."}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setShowCsvModal(true)}
-                className="btn btn-secondary text-xs flex items-center gap-1.5 cursor-pointer"
-              >
-                <FileSpreadsheet className="h-3.5 w-3.5 text-[#0a66c2]" />
-                <span>Import CSV</span>
-              </button>
-              <span className="status good">{effectiveLeads.length} loaded leads</span>
             </div>
           </div>
           <LeadManagementView
@@ -921,6 +946,7 @@ export default function CampaignsModule({
             continueLabel="Continue to campaign setup"
             showFilters={!importedOnly}
             readOnly={importedOnly}
+            campaignSetupScreen
           />
         </section>
       )}
@@ -941,33 +967,132 @@ export default function CampaignsModule({
             <p className="mt-2 text-sm text-muted">Personalized using the saved campaign context and selected lead data.</p>
             {!emailSequence.length && <p className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">No generated email sequence is saved for this campaign.</p>}
             <div className="mt-5 space-y-4">
-              {emailSequence.map((email, index) => (
-                <article key={email.step} className="rounded-xl border border-line bg-white p-4">
-                  <div className="flex items-center justify-between gap-3 border-b border-line pb-3">
-                    <div>
-                      <span className="status good">{index === 0 ? "Initial Email" : `Follow-up ${index}`}</span>
-                      <p className="mt-2 text-xs text-muted">{index === 0 ? "Send after launch" : `${email.delayDays} days after previous email`}</p>
+              {emailSequence.map((email, index) => {
+                const isInitial = index === 0;
+                const isFollowUp1 = index === 1;
+                const isFollowUp2 = index === 2;
+                const isSchedulingOpen = schedulingStep === index;
+                const scheduleLabel = getScheduleLabel(email, index, emailSequence);
+                const deliveryDate = getExpectedDeliveryDate(email, index, emailSequence);
+
+                return (
+                  <article key={email.step} className="rounded-xl border border-line bg-white p-4 shadow-2xs">
+                    <div className="flex items-center justify-between gap-3 border-b border-line pb-3">
+                      <div>
+                        <span className="status good">{isInitial ? "Initial Email" : `Follow-up ${index}`}</span>
+                        <p className="mt-1 text-xs font-medium text-muted">
+                          {scheduleLabel} {deliveryDate ? `· Est. ${deliveryDate}` : ""}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {(isFollowUp1 || isFollowUp2) && (
+                          <button
+                            className="btn btn-secondary text-xs flex items-center gap-1.5 cursor-pointer"
+                            type="button"
+                            onClick={() => setSchedulingStep(isSchedulingOpen ? null : index)}
+                          >
+                            <Calendar className="h-3.5 w-3.5 text-green" />
+                            <span>{isSchedulingOpen ? "Close Calendar" : "Schedule"}</span>
+                          </button>
+                        )}
+                        <button
+                          className="btn btn-secondary text-xs flex items-center gap-1.5 cursor-pointer"
+                          type="button"
+                          onClick={() => setEditingEmail(editingEmail === index ? null : index)}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                          <span>{editingEmail === index ? "Close Editor" : "Edit Email"}</span>
+                        </button>
+                      </div>
                     </div>
-                    <button className="btn btn-secondary text-xs" type="button" onClick={() => setEditingEmail(editingEmail === index ? null : index)}>
-                      <Pencil className="h-3.5 w-3.5" /> {editingEmail === index ? "Close" : "Edit"}
-                    </button>
-                  </div>
-                  {editingEmail === index ? (
-                    <div className="mt-4 grid gap-3">
-                      <label className="text-sm font-semibold">Subject<input className="input mt-2" value={email.subject} onChange={(event) => setEmailSequence((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, subject: event.target.value, manuallyEdited: true } : item))} /></label>
-                      <label className="text-sm font-semibold">Body<textarea className="input mt-2 min-h-28" value={email.body} onChange={(event) => setEmailSequence((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, body: event.target.value, manuallyEdited: true } : item))} /></label>
-                      <button className="btn btn-primary justify-self-start text-xs" type="button" onClick={() => { saveEmailSequence(emailSequence); setEditingEmail(null); }}>Save email</button>
+
+                    {/* Email Editor / Viewer */}
+                    {editingEmail === index ? (
+                      <div className="mt-4 grid gap-3">
+                        <label className="text-sm font-semibold">
+                          Subject
+                          <input
+                            className="input mt-2 font-medium"
+                            value={email.subject}
+                            onChange={(event) =>
+                              setEmailSequence((current) =>
+                                current.map((item, itemIndex) =>
+                                  itemIndex === index
+                                    ? { ...item, subject: event.target.value, manuallyEdited: true }
+                                    : item,
+                                ),
+                              )
+                            }
+                          />
+                        </label>
+                        <label className="text-sm font-semibold">
+                          Body
+                          <textarea
+                            className="input mt-2 min-h-28 leading-relaxed font-normal"
+                            value={email.body}
+                            onChange={(event) =>
+                              setEmailSequence((current) =>
+                                current.map((item, itemIndex) =>
+                                  itemIndex === index
+                                    ? { ...item, body: event.target.value, manuallyEdited: true }
+                                    : item,
+                                ),
+                              )
+                            }
+                          />
+                        </label>
+                        <button
+                          className="btn btn-primary justify-self-start text-xs cursor-pointer"
+                          type="button"
+                          onClick={() => {
+                            saveEmailSequence(emailSequence);
+                            setEditingEmail(null);
+                          }}
+                        >
+                          Save email
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="mt-4 space-y-3">
+                        <div>
+                          <p className="text-[11px] font-bold uppercase tracking-wider text-muted">Subject</p>
+                          <p className="mt-1 text-sm font-bold text-ink">{email.subject}</p>
+                        </div>
+                        <div>
+                          <p className="text-[11px] font-bold uppercase tracking-wider text-muted">Body</p>
+                          <p className="mt-1 whitespace-pre-line rounded-lg bg-mist p-3 text-sm leading-relaxed text-ink font-normal">
+                            {email.body}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[11px] font-bold uppercase tracking-wider text-muted">Recipients</p>
+                          <p className="mt-1 text-sm text-ink font-medium">
+                            {effectiveLeads
+                              .filter((lead) => selectedIds.has(lead.id))
+                              .map((lead) => lead.name)
+                              .join(", ") || "Selected leads"}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Schedule Control for Follow-up 1 & Follow-up 2 */}
+                    {(isFollowUp1 || isFollowUp2) && (
+                      <FollowUpScheduleControl
+                        stepIndex={index as 1 | 2}
+                        sequence={emailSequence}
+                        onUpdateSequence={(updated) => {
+                          saveEmailSequence(updated as CampaignEmail[]);
+                        }}
+                      />
+                    )}
+
+                    <div className="mt-3 flex items-center gap-2 border-t border-line pt-3 text-xs text-muted">
+                      <CheckCircle2 className="h-4 w-4 text-green" /> Saved to campaign
                     </div>
-                  ) : (
-                    <div className="mt-4 space-y-3">
-                      <div><p className="text-[11px] font-bold uppercase tracking-wider text-muted">Subject</p><p className="mt-1 text-sm font-bold">{email.subject}</p></div>
-                      <div><p className="text-[11px] font-bold uppercase tracking-wider text-muted">Body</p><p className="mt-1 whitespace-pre-line rounded-lg bg-mist p-3 text-sm leading-relaxed">{email.body}</p></div>
-                      <div><p className="text-[11px] font-bold uppercase tracking-wider text-muted">Recipients</p><p className="mt-1 text-sm">{effectiveLeads.filter((lead) => selectedIds.has(lead.id)).map((lead) => lead.name).join(", ") || "Selected leads"}</p></div>
-                    </div>
-                  )}
-                  <div className="mt-3 flex items-center gap-2 border-t border-line pt-3 text-xs text-muted"><CheckCircle2 className="h-4 w-4 text-green" /> Saved to campaign</div>
-                </article>
-              ))}
+                  </article>
+                );
+              })}
             </div>
           </section>
 
@@ -997,7 +1122,7 @@ export default function CampaignsModule({
       )}
 
       {step === 1 && (
-        <SetupCard eyebrow="Setup step 1 of 6" title="Connect your sending inbox." description="Authorize the Gmail account that this campaign will send from.">
+        <SetupCard className="!max-w-none" contentClassName="mx-auto w-full max-w-6xl" eyebrow="Email account connection" title="Connect your sending inbox." description="Choose the provider for this campaign. Connection happens in this workspace and your campaign draft remains intact.">
           {campaign?.id ? (
             <ConnectGmail
               campaignId={campaign.id}
@@ -1013,7 +1138,7 @@ export default function CampaignsModule({
       )}
 
       {step === 3 && (
-        <SetupCard eyebrow="Setup step 3 of 6" title="Configure sending safeguards." description="Confirm sending email and daily volume pacing before launching.">
+        <SetupCard className="!max-w-none" eyebrow="Setup step 3 of 6" title="Configure sending safeguards." description="Confirm sending email and daily volume pacing before launching.">
           <div className="mt-6 space-y-4">
             <label className="block text-sm font-semibold">
               Sending email
@@ -1042,7 +1167,7 @@ export default function CampaignsModule({
       )}
 
       {step === 4 && (
-        <SetupCard eyebrow="Setup step 4 of 6" title="Review domain authentication." description="DNS authentication must be configured with your email provider before sending from a custom domain.">
+        <SetupCard className="!max-w-none" eyebrow="Setup step 4 of 6" title="Review domain authentication." description="DNS authentication must be configured with your email provider before sending from a custom domain.">
           <div className="mt-6 space-y-4">
               <div className="rounded-2xl border border-line bg-canvas p-5 space-y-3">
               <div className="flex items-center gap-2 text-sm font-bold text-ink">
@@ -1070,7 +1195,7 @@ export default function CampaignsModule({
       )}
 
       {step === 5 && (
-        <SetupCard eyebrow="Setup step 5 of 6" title="Review before launch." description="Verify all audience, email sequence, and sending parameters.">
+        <SetupCard className="!max-w-none" eyebrow="Setup step 5 of 6" title="Review before launch." description="Verify all audience, email sequence, and sending parameters.">
           <div className="mt-6 grid gap-4 sm:grid-cols-2">
             <div className="rounded-2xl border border-line bg-canvas p-4 space-y-1">
               <span className="text-[10px] font-bold text-muted uppercase">Audience</span>
@@ -1094,7 +1219,7 @@ export default function CampaignsModule({
       )}
 
       {step === 6 && (
-        <SetupCard eyebrow="Final step" title="Ready to launch your campaign." description="Your verified contacts and sequences are ready to run.">
+        <SetupCard className="!max-w-none" eyebrow="Final step" title="Ready to launch your campaign." description="Your verified contacts and sequences are ready to run.">
           <div className="mt-6 space-y-4">
             {launchError && (
               <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
@@ -1103,7 +1228,9 @@ export default function CampaignsModule({
             )}
             {launchResult && (
               <div className={`rounded-xl border p-3 text-xs ${launchResult.failedCount ? "border-amber-200 bg-amber-50 text-amber-800" : "border-green/20 bg-green-soft text-green-dark"}`} role="status">
-                Sent {launchResult.sentCount} of {launchResult.total} emails. {launchResult.failedCount} failed.
+                {launchResult.pendingCount > 0
+                  ? `${launchResult.pendingCount} emails queued for delivery. ${launchResult.sentCount} sent, ${launchResult.failedCount} failed.`
+                  : `Sent ${launchResult.sentCount} of ${launchResult.total} emails. ${launchResult.failedCount} failed.`}
               </div>
             )}
             <div className="rounded-2xl border border-green/20 bg-green-soft p-5">
@@ -1451,13 +1578,19 @@ function CsvImportModal({
   );
 }
 
-function SetupCard({ eyebrow, title, description, children }: { eyebrow: string; title: string; description: string; children: ReactNode }) {
-  return (
-    <section className="surface panel max-w-4xl">
+function SetupCard({ eyebrow, title, description, children, className = "", contentClassName = "" }: { eyebrow: string; title: string; description: string; children: ReactNode; className?: string; contentClassName?: string }) {
+  const content = (
+    <>
       <p className="eyebrow">{eyebrow}</p>
       <h2 className="mt-2 text-2xl font-bold">{title}</h2>
       <p className="mt-2 text-sm text-muted">{description}</p>
       {children}
+    </>
+  );
+
+  return (
+    <section className={`surface panel max-w-4xl ${className}`}>
+      {contentClassName ? <div className={contentClassName}>{content}</div> : content}
     </section>
   );
 }

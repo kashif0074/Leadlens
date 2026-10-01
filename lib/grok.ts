@@ -234,7 +234,8 @@ function parseGeneratedEmails(value: unknown): GeneratedEmail[] {
     }
     return {
       step: index + 1,
-      delayDays: index === 0 ? 0 : index === 1 ? 3 : 5,
+      delayDays: index === 0 ? 0 : index === 1 ? 7 : 10,
+      intervalDays: index === 0 ? 0 : index === 1 ? 7 : 3,
       subject: subject.trim(),
       body: body.trim(),
     };
