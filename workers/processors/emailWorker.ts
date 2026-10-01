@@ -1,16 +1,6 @@
 // workers/processors/emailWorker.ts
 // Robust Nodemailer email-sending helper for Gmail and custom SMTP providers.
 import nodemailer from "nodemailer";
-import http from "http";
-
-const PORT = process.env.PORT || 3001;
-
-http.createServer((req, res) => {
-  res.writeHead(200, { "Content-Type": "text/plain" });
-  res.end("Worker is alive");
-}).listen(PORT, () => {
-  console.log(`Health-check server listening on port ${PORT}`);
-});
 
 export type SmtpCredentials = {
   email: string;
