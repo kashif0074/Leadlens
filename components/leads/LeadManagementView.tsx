@@ -744,18 +744,20 @@ export default function LeadManagementView({
       )}
 
       {/* Layout Grid: Sidebar Filters & Leads Table */}
-      <div className={campaignSetupScreen
-        ? "grid w-full min-w-0 gap-4 lg:grid-cols-[minmax(15rem,18rem)_minmax(0,1fr)]"
-        : "flex flex-col items-start gap-5 lg:flex-row"}
-      >
+      <div className={
+        showFilters
+          ? (campaignSetupScreen
+              ? "grid w-full min-w-0 gap-4 lg:grid-cols-[minmax(15rem,18rem)_minmax(0,1fr)]"
+              : "flex flex-col items-start gap-5 lg:flex-row")
+          : "w-full min-w-0"
+      }>
         {/* ========================================================= */}
         {/* FILTER SIDEBAR                                            */}
         {/* ========================================================= */}
-        <aside
-          className={showFilters
-            ? `${filtersOpen ? "block" : "hidden"} w-full shrink-0 space-y-4 rounded-3xl border border-line bg-white p-5 text-xs shadow-xs ${campaignSetupScreen ? "lg:block" : "lg:block lg:w-80"}`
-            : "hidden"}
-        >
+        {showFilters && (
+          <aside
+            className={`${filtersOpen ? "block" : "hidden"} w-full shrink-0 space-y-4 rounded-3xl border border-line bg-white p-5 text-xs shadow-xs ${campaignSetupScreen ? "lg:block" : "lg:block lg:w-80"}`}
+          >
           {/* Header */}
           <div className="flex items-center justify-between border-b border-line pb-3">
             <div className="flex items-center gap-2 text-sm font-bold text-ink">
@@ -982,13 +984,14 @@ export default function LeadManagementView({
             )}
           </div>
         </aside>
+        )}
 
         {/* ========================================================= */}
         {/* LEADS TABLE & CONTROLS                                    */}
         {/* ========================================================= */}
         <div className="flex min-w-0 w-full flex-1 flex-col overflow-hidden rounded-3xl border border-line bg-white shadow-xs">
           {/* Table Top Counter */}
-          <div className="flex items-center justify-between border-b border-line bg-canvas px-4 py-3 text-xs text-muted">
+          <div className="flex items-center justify-between border-b border-line bg-canvas px-4 py-3 text-xs text-muted sm:px-6">
             <div className="flex items-center gap-2">
               <span>
                 Showing <strong className="text-ink font-bold">{filteredLeads.length}</strong> of{" "}
@@ -1004,7 +1007,7 @@ export default function LeadManagementView({
           </div>
 
           {/* Table Container */}
-          <div className="overflow-x-auto rounded-3xl border border-line bg-white shadow-[0_4px_24px_rgba(0,0,0,0.03)]">
+          <div className="overflow-x-auto w-full">
             <table className="w-full min-w-[960px] border-collapse text-left text-xs">
               <thead className="border-b border-line bg-mist/60 text-[11px] font-bold uppercase tracking-wider text-muted/90">
                 <tr>
@@ -1160,10 +1163,12 @@ export default function LeadManagementView({
           )}
 
           {/* Bottom Table Actions */}
-          <div className={`flex flex-col gap-4 border-t border-line bg-canvas p-4 sm:flex-row sm:items-center sm:p-5 ${campaignSetupScreen ? "sm:justify-end" : "sm:justify-between"}`}>
+          <div className="flex flex-col gap-4 border-t border-line bg-canvas p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
             {readOnly ? (
               <>
-                <p className="text-sm font-medium text-muted">{leads.length} imported records</p>
+                <p className="text-sm font-medium text-muted">
+                  {leads.length} imported {leads.length === 1 ? "record" : "records"}
+                </p>
                 {showContinue && (
                   <button
                     type="button"
@@ -1178,18 +1183,16 @@ export default function LeadManagementView({
               </>
             ) : (
               <>
-                {!campaignSetupScreen && (
-                  <div>
-                    <div className="text-sm font-bold text-ink">
-                      <strong className="text-green font-extrabold">{selectedLeadIds.size}</strong> of{" "}
-                      {leads.length} leads selected
-                    </div>
-                    <p className="text-[11px] text-muted">
-                      Selected prospects will receive personalized outreach sequences in this campaign.
-                    </p>
+                <div>
+                  <div className="text-sm font-bold text-ink">
+                    <strong className="text-green font-extrabold">{selectedLeadIds.size}</strong> of{" "}
+                    {leads.length} leads selected
                   </div>
-                )}
-                <div className={`flex flex-wrap items-center justify-end gap-3 ${campaignSetupScreen ? "w-full" : ""}`}>
+                  <p className="text-[11px] text-muted">
+                    Selected prospects will receive personalized outreach sequences in this campaign.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center justify-end gap-3">
                   <button
                     type="button"
                     onClick={() => {
