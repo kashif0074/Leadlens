@@ -12,7 +12,6 @@ import {
   Inbox,
   CalendarCheck,
   TrendingUp,
-  SlidersHorizontal,
   Menu,
   X,
   House,
@@ -34,7 +33,6 @@ const menuItems: { id: AppModule; label: string; icon: React.ElementType }[] = [
   { id: "inbox", label: "Inbox", icon: Inbox },
   { id: "meetings", label: "Meetings", icon: CalendarCheck },
   { id: "analytics", label: "Analytics", icon: TrendingUp },
-  { id: "settings", label: "Settings", icon: SlidersHorizontal },
 ];
 
 function isItemActive(currentModule: AppModule, itemId: AppModule) {
@@ -53,7 +51,7 @@ function moduleTitle(currentModule: AppModule) {
   if (currentModule === "email-sequence") return "Email sequence";
   if (currentModule === "inbox") return "Inbox";
   if (currentModule === "meetings") return "Meetings";
-  if (currentModule === "settings") return "Profile & Settings";
+  if (currentModule === "settings") return "Profile";
   return currentModule.replace("-", " ");
 }
 
@@ -131,13 +129,17 @@ export default function AppShell({
             </nav>
           </div>
 
-          <div className="space-y-1.5 border-t border-line pt-3">
+          <div className="border-t border-line pt-3">
             {/* Clickable Profile Section -> Opens Profile / Settings */}
             <button
               type="button"
               onClick={() => selectModule("settings")}
-              className={`flex w-full items-center ${isCollapsed ? "justify-center" : "gap-2.5 px-2"} py-2 rounded-2xl hover:bg-mist transition-colors cursor-pointer text-left`}
-              title="View profile details"
+              className={`flex w-full items-center ${isCollapsed ? "justify-center" : "gap-2.5 px-2.5"} py-2.5 rounded-2xl transition-all cursor-pointer text-left ${
+                currentModule === "settings"
+                  ? "bg-green-soft border border-green/20 text-ink shadow-2xs"
+                  : "hover:bg-mist"
+              }`}
+              title="View profile & settings"
             >
               {userImage ? (
                 <Image
@@ -160,19 +162,6 @@ export default function AppShell({
                 </div>
               )}
             </button>
-
-            <button
-              type="button"
-              onClick={onSwitchToLanding}
-              className={`flex w-full items-center rounded-xl py-2 text-xs font-semibold text-muted hover:bg-mist hover:text-green cursor-pointer ${
-                isCollapsed ? "justify-center" : "px-3"
-              }`}
-              title="Back to landing"
-            >
-              {!isCollapsed && <span>Back to landing</span>}
-              {isCollapsed && <House className="h-4 w-4" />}
-            </button>
-
           </div>
         </aside>
       )}
@@ -207,13 +196,17 @@ export default function AppShell({
               </div>
             </div>
 
-            <div className="border-t border-line pt-4 space-y-2">
+            <div className="border-t border-line pt-4">
               {/* Clickable Profile in Mobile Drawer */}
               <button
                 type="button"
                 onClick={() => selectModule("settings")}
-                className="flex w-full items-center gap-2.5 rounded-2xl p-2 hover:bg-mist transition-colors cursor-pointer text-left"
-                title="View profile details"
+                className={`flex w-full items-center gap-2.5 rounded-2xl p-2.5 transition-all cursor-pointer text-left ${
+                  currentModule === "settings"
+                    ? "bg-green-soft border border-green/20 text-ink shadow-2xs"
+                    : "hover:bg-mist"
+                }`}
+                title="View profile & settings"
               >
                 {userImage ? (
                   <Image
@@ -234,16 +227,6 @@ export default function AppShell({
                   {userEmail && <p className="truncate text-[10px] text-muted">{userEmail}</p>}
                 </div>
               </button>
-
-              <button
-                type="button"
-                onClick={onSwitchToLanding}
-                className="flex w-full items-center gap-2 rounded-xl py-2 px-1 text-xs font-semibold text-muted hover:text-green cursor-pointer"
-              >
-                <House className="h-4 w-4" />
-                <span>Back to landing</span>
-              </button>
-
             </div>
           </aside>
         </div>
